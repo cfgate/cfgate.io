@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'api/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'mise.toml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'api/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'mise.toml'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: golangci-lint
+        run: mise run lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: Generate
+        run: mise run generate
+
+      - name: Run tests
+        run: mise run test
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: cover.out
+          fail_ci_if_error: false
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: Build binary
+        run: mise run build
+
+      - name: Build Docker image
+        run: mise run docker:build

@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: demo
+
+resources:
+  - namespace.yaml
+  - tunnel.yaml
+  - gateway.yaml
+  - dnssync.yaml
+  - echo-service.yaml
+  - httproute.yaml
+
+# Configure these for your environment
+configMapGenerator:
+  - name: cfgate-config
+    literals:
+      - CLOUDFLARE_ACCOUNT_ID=your-account-id-here
+
+generatorOptions:
+  disableNameSuffixHash: true

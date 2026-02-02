@@ -1,0 +1,15 @@
+apiVersion: cfgate.io/v1alpha1
+kind: CloudflareTunnel
+metadata:
+  name: multi-tunnel
+  namespace: cfgate-system
+spec:
+  tunnel:
+    name: multi-tunnel
+  cloudflare:
+    accountId: "${CLOUDFLARE_ACCOUNT_ID}"
+    secretRef:
+      name: cloudflare-credentials
+  cloudflared:
+    replicas: 2
+  fallbackTarget: http_status:404

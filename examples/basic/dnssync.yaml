@@ -1,0 +1,24 @@
+apiVersion: cfgate.io/v1alpha1
+kind: CloudflareDNSSync
+metadata:
+  name: demo-dns
+  namespace: cfgate-system
+spec:
+  tunnelRef:
+    name: demo-tunnel
+  zones:
+    - name: example.com  # Replace with your domain
+  source:
+    gatewayRoutes:
+      enabled: true
+  defaults:
+    proxied: true
+    ttl: auto
+  ownership:
+    txtRecord:
+      enabled: true
+      prefix: _cfgate
+  cleanupPolicy:
+    deleteOnRouteRemoval: true
+    deleteOnResourceRemoval: true
+    onlyManaged: true

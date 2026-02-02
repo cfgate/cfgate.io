@@ -1,0 +1,23 @@
+apiVersion: cfgate.io/v1alpha1
+kind: CloudflareTunnel
+metadata:
+  name: demo-tunnel
+  namespace: cfgate-system
+spec:
+  tunnel:
+    name: demo-tunnel
+  cloudflare:
+    # Set via kustomization configMapGenerator or replace directly
+    accountId: "${CLOUDFLARE_ACCOUNT_ID}"
+    secretRef:
+      name: cloudflare-credentials
+  cloudflared:
+    replicas: 2
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  fallbackTarget: http_status:404

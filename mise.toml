@@ -1,37 +1,163 @@
 # cfgate mise configuration
-# Purpose: env/secrets + cluster tools (e2e test setup)
-# Build/test orchestration: use Makefile
+# Replaces Makefile - all build/test/deploy orchestration
 
 [env]
 _.file = ["secrets.enc.yaml", ".env"]
 
-# Default to using existing cluster for E2E
+# Image configuration
+IMG = "cfgate:local"
+REGISTRY = "ghcr.io/inherent-design/cfgate"
+
+# Test configuration
 E2E_USE_EXISTING_CLUSTER = "true"
+ENVTEST_K8S_VERSION = "1.35.0"
 
 [tools]
-# Cluster management only - build tools handled by Makefile
+go = "1.25"
 "aqua:kubernetes-sigs/kind" = "0.31.0"
 "aqua:kubernetes/kubernetes/kubectl" = "1.35.0"
-
-[tasks."e2e"]
-description = "Run e2e tests"
-run = "make test-e2e"
+"aqua:kubernetes-sigs/kustomize" = "5.8.0"
+"aqua:golangci/golangci-lint" = "1.63.4"
+"github:kubernetes-sigs/controller-tools[exe=controller-gen]" = "0.20.0"
 
 #
-# Cluster Lifecycle (one-time setup, not per-test)
+# Development
 #
 
-[tasks."cluster-create"]
-description = "Create dedicated cfgate test cluster (one-time)"
+[tasks.generate]
+alias = "gen"
+description = "Generate DeepCopy and CRD manifests"
+run = """
+controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
+controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+"""
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks."lint:fix"]
+description = "Run golangci-lint with auto-fix"
+run = "golangci-lint run --fix"
+
+[tasks.fmt]
+description = "Format and vet code"
+run = "go fmt ./... && go vet ./..."
+
+#
+# Testing
+#
+
+[tasks.test]
+alias = "t"
+description = "Run unit tests (excludes e2e)"
+depends = ["generate"]
+run = """
+go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.23
+KUBEBUILDER_ASSETS="$(setup-envtest use ${ENVTEST_K8S_VERSION} --bin-dir /tmp/envtest -p path)" \
+  go test $(go list ./... | grep -v /e2e) -coverprofile cover.out
+"""
+
+[tasks.e2e]
+alias = "e"
+description = "Run e2e tests (requires cluster + Cloudflare creds)"
+run = "go test ./test/e2e/... -v -timeout 30m"
+
+#
+# Build
+#
+
+[tasks.build]
+alias = "b"
+description = "Build manager binary"
+depends = ["generate"]
+run = "CGO_ENABLED=0 go build -o bin/manager ./cmd/manager"
+
+[tasks."docker:build"]
+alias = "db"
+description = "Build Docker image"
+run = "docker build -t ${IMG} ."
+
+[tasks."docker:push"]
+alias = "dp"
+description = "Push Docker image to registry"
+run = """
+docker tag ${IMG} ${REGISTRY}:latest
+docker push ${REGISTRY}:latest
+"""
+
+[tasks."docker:buildx"]
+description = "Build multi-arch image (amd64 + arm64)"
+run = """
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t ${REGISTRY}:latest \
+  --push .
+"""
+
+#
+# Cluster - Local Development
+#
+
+[tasks."cluster:create"]
+description = "Create dedicated cfgate test cluster"
 run = """
 kind create cluster --name cfgate-test --wait 5m
 kubectl cluster-info --context kind-cfgate-test
 """
 
-[tasks."cluster-delete"]
-description = "Delete cfgate test cluster only"
+[tasks."cluster:delete"]
+description = "Delete cfgate test cluster"
 run = "kind delete cluster --name cfgate-test"
 
-[tasks."cluster-status"]
+[tasks."cluster:status"]
 description = "Check cfgate test cluster status"
 run = "kind get clusters | grep cfgate-test && kubectl --context kind-cfgate-test get nodes || echo 'cfgate-test cluster not found'"
+
+#
+# Deploy - Local Development
+#
+
+[tasks.install]
+alias = "i"
+description = "Install CRDs into current cluster"
+depends = ["generate"]
+run = "kustomize build config/crd | kubectl apply -f -"
+
+[tasks.uninstall]
+description = "Uninstall CRDs from current cluster"
+run = "kustomize build config/crd | kubectl delete --ignore-not-found -f -"
+
+[tasks.deploy]
+alias = "d"
+description = "Deploy controller to current cluster"
+depends = ["generate", "docker:build"]
+run = """
+cd config/manager && kustomize edit set image controller=${IMG}
+kustomize build config/default | kubectl apply -f -
+"""
+
+[tasks.undeploy]
+description = "Remove controller from current cluster"
+run = "kustomize build config/default | kubectl delete --ignore-not-found -f -"
+
+[tasks.run]
+alias = "r"
+description = "Run controller locally (outside cluster)"
+depends = ["generate"]
+run = "go run ./cmd/manager"
+
+#
+# Release
+#
+
+[tasks."release:manifests"]
+description = "Generate release manifests to dist/"
+depends = ["generate"]
+run = """
+mkdir -p dist
+cp config/crd/bases/*.yaml dist/
+kustomize build config/default > dist/install.yaml
+echo "Release manifests written to dist/"
+ls -la dist/
+"""

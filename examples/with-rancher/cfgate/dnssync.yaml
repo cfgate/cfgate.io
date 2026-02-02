@@ -1,0 +1,15 @@
+apiVersion: cfgate.io/v1alpha1
+kind: CloudflareDNSSync
+metadata:
+  name: rancher-dns
+  namespace: cfgate-system
+spec:
+  tunnelRef:
+    name: rancher-tunnel
+  zones:
+    - name: example.com
+  source:
+    gatewayRoutes:
+      enabled: true
+  defaults:
+    proxied: true
