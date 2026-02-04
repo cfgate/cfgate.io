@@ -1,6 +1,3 @@
-// Package context provides wrapper types for clean separation between raw API
-// types and processing logic. Based on Envoy Gateway's GatewayContext and
-// ListenerContext patterns.
 package context
 
 import (

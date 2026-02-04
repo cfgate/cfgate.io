@@ -1,4 +1,3 @@
-// Package cloudflare provides a wrapper around cloudflare-go for cfgate's needs.
 package cloudflare
 
 import (
@@ -74,14 +73,16 @@ func (p *PolicyChecker) AllowsDelete() bool {
 	return p.policy == PolicySync
 }
 
-// DNSService handles DNS-specific operations.
-// It wraps the unified Client interface with cfgate-specific logic.
+// DNSService handles DNS record operations including sync, ownership tracking,
+// and policy-based lifecycle management. It wraps the Client interface with
+// cfgate-specific logic for idempotent record sync and external-dns compatible ownership.
 type DNSService struct {
 	client Client
 	log    logr.Logger
 }
 
-// NewDNSService creates a new DNSService.
+// NewDNSService creates a new DNSService with the given client and logger.
+// The logger is named "dns-service" for structured logging context.
 func NewDNSService(client Client, log logr.Logger) *DNSService {
 	return &DNSService{
 		client: client,
@@ -204,7 +205,8 @@ func (s *DNSService) updateRecord(ctx context.Context, zoneID, recordID string, 
 	return record, true, nil
 }
 
-// recordsMatch checks if two records have the same content.
+// recordsMatch checks if two records have identical content, proxied, TTL, and comment.
+// Name and Type are assumed to match from the lookup.
 func recordsMatch(a, b *DNSRecord) bool {
 	return a.Content == b.Content &&
 		a.Proxied == b.Proxied &&

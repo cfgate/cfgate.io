@@ -1,4 +1,3 @@
-// Package controller contains the reconciliation logic for cfgate CRDs.
 package controller
 
 import (
@@ -28,8 +27,11 @@ const (
 )
 
 // GatewayReconciler reconciles Gateway resources that reference CloudflareTunnel.
-// It validates tunnel references, updates Gateway status, and triggers
-// tunnel configuration syncs when Gateway configuration changes.
+//
+// It validates tunnel references via the cfgate.io/tunnel-ref annotation, updates
+// Gateway status conditions and addresses based on tunnel state, and counts attached
+// routes for listener status. This controller does NOT manage DNS (see CloudflareDNS CRD)
+// or tunnel lifecycle (see CloudflareTunnel CRD).
 type GatewayReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -43,9 +45,20 @@ type GatewayReconciler struct {
 
 // Reconcile handles the reconciliation loop for Gateway resources.
 // It validates the tunnel reference and updates Gateway status.
+//
+// The reconciliation proceeds through these phases:
+//  1. Fetch the Gateway resource
+//  2. Verify GatewayClass is managed by cfgate
+//  3. Validate cfgate.io/tunnel-ref annotation
+//  4. Resolve the referenced CloudflareTunnel
+//  5. Update Gateway status (addresses, conditions, listeners)
+//
+// On error or missing tunnel, the controller requeues after 30 seconds.
+// On success, it requeues after 5 minutes for periodic status sync.
 func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("reconciling Gateway", "name", req.Name, "namespace", req.Namespace)
+	log := log.FromContext(ctx).WithName("controller").WithName("gateway").
+		WithValues("namespace", req.Namespace, "name", req.Name)
+	log.Info("starting reconciliation")
 
 	// 1. Fetch Gateway resource
 	var gateway gwapiv1.Gateway
@@ -101,13 +114,22 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // SetupWithManager sets up the controller with the Manager.
+//
+// Watched resources:
+//   - Gateway (primary resource)
+//
+// The controller only processes Gateways whose GatewayClass specifies
+// cfgate.io/cloudflare-tunnel-controller as the controller name.
 func (r *GatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	log := mgr.GetLogger().WithName("controller").WithName("gateway")
+	log.Info("registering controller with manager")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gwapiv1.Gateway{}).
 		Complete(r)
 }
 
-// isOurGatewayClass checks if the GatewayClass is managed by cfgate.
+// isOurGatewayClass checks if the Gateway's GatewayClass is managed by cfgate.
+// Returns true if the GatewayClass spec.controllerName matches GatewayControllerName.
 func (r *GatewayReconciler) isOurGatewayClass(ctx context.Context, gateway *gwapiv1.Gateway) (bool, error) {
 	var gc gwapiv1.GatewayClass
 	if err := r.Get(ctx, types.NamespacedName{Name: string(gateway.Spec.GatewayClassName)}, &gc); err != nil {
@@ -120,8 +142,9 @@ func (r *GatewayReconciler) isOurGatewayClass(ctx context.Context, gateway *gwap
 	return string(gc.Spec.ControllerName) == GatewayControllerName, nil
 }
 
-// resolveTunnelRef resolves the tunnel reference annotation to a CloudflareTunnel.
-// Returns the tunnel or an error if not found/invalid.
+// resolveTunnelRef resolves the cfgate.io/tunnel-ref annotation to a CloudflareTunnel.
+// The annotation must be in "namespace/name" format. Returns the tunnel or an error
+// if the annotation is missing, malformed, or the tunnel does not exist.
 func (r *GatewayReconciler) resolveTunnelRef(ctx context.Context, gateway *gwapiv1.Gateway) (*cfgatev1alpha1.CloudflareTunnel, error) {
 	tunnelRef := annotations.GetAnnotation(gateway, annotations.AnnotationTunnelRef)
 	if tunnelRef == "" {
@@ -147,8 +170,9 @@ func (r *GatewayReconciler) resolveTunnelRef(ctx context.Context, gateway *gwapi
 	return &tunnel, nil
 }
 
-// updateGatewayStatus updates the Gateway status with tunnel information.
-// Sets addresses, conditions, and listener status.
+// updateGatewayStatus updates the Gateway status based on tunnel state.
+// It sets addresses to the tunnel domain, updates Accepted/Programmed conditions,
+// and populates listener status with attached route counts.
 func (r *GatewayReconciler) updateGatewayStatus(ctx context.Context, gateway *gwapiv1.Gateway, tunnel *cfgatev1alpha1.CloudflareTunnel) error {
 	// Set addresses to tunnel domain
 	if tunnel.Status.TunnelDomain != "" {
@@ -204,7 +228,8 @@ func (r *GatewayReconciler) updateGatewayStatus(ctx context.Context, gateway *gw
 	return r.Status().Update(ctx, gateway)
 }
 
-// countAttachedRoutes counts the number of routes attached to a Gateway listener.
+// countAttachedRoutes counts the number of HTTPRoutes attached to a Gateway listener.
+// It matches routes by parentRef name/namespace and optionally by sectionName.
 func (r *GatewayReconciler) countAttachedRoutes(ctx context.Context, gateway *gwapiv1.Gateway, listener gwapiv1.Listener) int32 {
 	var routes gwapiv1.HTTPRouteList
 	if err := r.List(ctx, &routes); err != nil {
@@ -232,7 +257,8 @@ func (r *GatewayReconciler) countAttachedRoutes(ctx context.Context, gateway *gw
 	return count
 }
 
-// setGatewayCondition sets a condition on the Gateway status.
+// setGatewayCondition sets or updates a condition on the Gateway status.
+// It finds an existing condition by type and replaces it, or appends a new one.
 func (r *GatewayReconciler) setGatewayCondition(gateway *gwapiv1.Gateway, conditionType gwapiv1.GatewayConditionType, status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
 		Type:               string(conditionType),
@@ -257,7 +283,8 @@ func (r *GatewayReconciler) setGatewayCondition(gateway *gwapiv1.Gateway, condit
 	}
 }
 
-// ptrTo returns a pointer to the given value.
+// ptrTo returns a pointer to the given value. Generic helper for Gateway API types
+// that require pointers for optional fields.
 func ptrTo[T any](v T) *T {
 	return &v
 }

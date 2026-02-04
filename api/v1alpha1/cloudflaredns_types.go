@@ -6,7 +6,11 @@ import (
 )
 
 // DNSTunnelRef references a CloudflareTunnel resource for DNS CNAME target resolution.
-// When specified, DNS records target the tunnel's domain ({tunnelId}.cfargotunnel.com).
+//
+// DNSTunnelRef creates a dependency between CloudflareDNS and CloudflareTunnel resources.
+// When specified, DNS CNAME records are created pointing to the tunnel's domain
+// ({tunnelId}.cfargotunnel.com). The controller waits for the tunnel to be ready before
+// creating DNS records.
 type DNSTunnelRef struct {
 	// Name is the name of the CloudflareTunnel.
 	// +kubebuilder:validation:Required
@@ -22,32 +26,49 @@ type DNSTunnelRef struct {
 }
 
 // RecordType represents DNS record types supported by CloudflareDNS.
+//
+// RecordType is used in ExternalTarget to specify the DNS record type for non-tunnel targets.
+// CNAME is used for tunnel references and external domain targets. A and AAAA are used for
+// direct IP address targets.
+//
 // +kubebuilder:validation:Enum=CNAME;A;AAAA
 type RecordType string
 
 const (
-	// RecordTypeCNAME is a CNAME record type.
+	// RecordTypeCNAME represents a CNAME record type for alias records.
 	RecordTypeCNAME RecordType = "CNAME"
-	// RecordTypeA is an A record type.
+	// RecordTypeA represents an A record type for IPv4 addresses.
 	RecordTypeA RecordType = "A"
-	// RecordTypeAAAA is an AAAA record type.
+	// RecordTypeAAAA represents an AAAA record type for IPv6 addresses.
 	RecordTypeAAAA RecordType = "AAAA"
 )
 
 // DNSPolicy defines the DNS record lifecycle policy.
+//
+// DNSPolicy controls how the controller manages DNS records throughout their lifecycle.
+// This is aligned with external-dns patterns for compatibility with existing workflows.
+//
 // +kubebuilder:validation:Enum=sync;upsert-only;create-only
 type DNSPolicy string
 
 const (
-	// DNSPolicySync creates, updates, and deletes records (default).
+	// DNSPolicySync creates, updates, and deletes DNS records to match desired state.
+	// This is the default policy providing full lifecycle management.
 	DNSPolicySync DNSPolicy = "sync"
-	// DNSPolicyUpsertOnly creates and updates only, never deletes.
+	// DNSPolicyUpsertOnly creates new records and updates existing ones but never deletes.
+	// Use this policy to prevent accidental deletion of DNS records.
 	DNSPolicyUpsertOnly DNSPolicy = "upsert-only"
-	// DNSPolicyCreateOnly creates only, never updates or deletes.
+	// DNSPolicyCreateOnly creates new records but never updates or deletes them.
+	// Use this policy for records that should be immutable after creation.
 	DNSPolicyCreateOnly DNSPolicy = "create-only"
 )
 
 // ExternalTarget defines a non-tunnel DNS target for external CNAME, A, or AAAA records.
+//
+// ExternalTarget enables CloudflareDNS to manage DNS records that point to external resources
+// rather than Cloudflare tunnels. This supports use cases like pointing to external load
+// balancers, CDN origins, or third-party services.
+//
 // +kubebuilder:validation:XValidation:rule="self.type == 'CNAME' || self.type == 'A' || self.type == 'AAAA'",message="type must be CNAME, A, or AAAA"
 type ExternalTarget struct {
 	// Type is the DNS record type.
@@ -62,7 +83,11 @@ type ExternalTarget struct {
 	Value string `json:"value"`
 }
 
-// DNSZoneConfig defines a DNS zone to manage.
+// DNSZoneConfig defines a DNS zone where records will be managed.
+//
+// DNSZoneConfig identifies a Cloudflare DNS zone either by name (requiring API lookup)
+// or by explicit zone ID. The optional Proxied field sets the default proxy behavior
+// for all records in this zone.
 type DNSZoneConfig struct {
 	// Name is the zone domain name (e.g., example.com).
 	// +kubebuilder:validation:Required
@@ -81,7 +106,12 @@ type DNSZoneConfig struct {
 	Proxied *bool `json:"proxied,omitempty"`
 }
 
-// DNSNamespaceSelector limits route discovery to specific namespaces.
+// DNSNamespaceSelector limits Gateway API route discovery to specific namespaces.
+//
+// DNSNamespaceSelector filters which namespaces the controller watches for HTTPRoute and
+// other Gateway API route resources. This enables multi-tenant scenarios where different
+// CloudflareDNS resources manage routes from different namespaces.
+//
 // +kubebuilder:validation:XValidation:rule="has(self.matchLabels) || has(self.matchNames)",message="at least one selector must be specified"
 type DNSNamespaceSelector struct {
 	// MatchLabels selects namespaces with matching labels.
@@ -95,7 +125,11 @@ type DNSNamespaceSelector struct {
 	MatchNames []string `json:"matchNames,omitempty"`
 }
 
-// DNSGatewayRoutesSource configures watching Gateway API routes for hostnames.
+// DNSGatewayRoutesSource configures automatic hostname discovery from Gateway API routes.
+//
+// DNSGatewayRoutesSource enables the controller to watch HTTPRoute, GRPCRoute, and other
+// Gateway API route resources to automatically discover hostnames that need DNS records.
+// Routes can be filtered by annotation and namespace to control which routes trigger DNS sync.
 type DNSGatewayRoutesSource struct {
 	// Enabled enables watching Gateway API routes.
 	// +kubebuilder:default=true
@@ -111,7 +145,12 @@ type DNSGatewayRoutesSource struct {
 	NamespaceSelector *DNSNamespaceSelector `json:"namespaceSelector,omitempty"`
 }
 
-// DNSExplicitHostname defines an explicit hostname to sync.
+// DNSExplicitHostname defines an explicit hostname to sync with optional per-hostname configuration.
+//
+// DNSExplicitHostname provides direct specification of DNS hostnames without depending on
+// Gateway API route discovery. The Target field supports the {{ .TunnelDomain }} template
+// variable for dynamic resolution when using tunnelRef.
+//
 // +kubebuilder:validation:XValidation:rule="!has(self.ttl) || self.ttl == 1 || (self.ttl >= 60 && self.ttl <= 86400)",message="TTL must be 1 (auto) or between 60 and 86400 seconds"
 type DNSExplicitHostname struct {
 	// Hostname is the DNS hostname to create.
@@ -140,7 +179,11 @@ type DNSExplicitHostname struct {
 	TTL int32 `json:"ttl,omitempty"`
 }
 
-// DNSHostnameSource defines sources for hostnames to sync.
+// DNSHostnameSource defines the sources from which hostnames are collected for DNS sync.
+//
+// DNSHostnameSource supports two complementary sources: automatic discovery from Gateway API
+// routes and explicit hostname definitions. Both can be used together; explicit hostnames
+// take precedence over route-discovered hostnames when there are conflicts.
 type DNSHostnameSource struct {
 	// GatewayRoutes configures watching Gateway API routes.
 	// +optional
@@ -152,7 +195,12 @@ type DNSHostnameSource struct {
 	Explicit []DNSExplicitHostname `json:"explicit,omitempty"`
 }
 
-// DNSRecordDefaults defines default settings for DNS records.
+// DNSRecordDefaults defines default settings applied to all DNS records.
+//
+// DNSRecordDefaults provides fallback values for records that do not specify explicit
+// settings. Per-hostname and per-zone settings take precedence over these defaults.
+// A TTL of 1 indicates "auto" which lets Cloudflare manage the TTL (typically 300s).
+//
 // +kubebuilder:validation:XValidation:rule="!has(self.ttl) || self.ttl == 1 || (self.ttl >= 60 && self.ttl <= 86400)",message="TTL must be 1 (auto) or between 60 and 86400 seconds"
 type DNSRecordDefaults struct {
 	// Proxied enables Cloudflare proxy by default.
@@ -167,7 +215,12 @@ type DNSRecordDefaults struct {
 	TTL int32 `json:"ttl,omitempty"`
 }
 
-// DNSTXTRecordOwnership configures TXT record-based ownership tracking.
+// DNSTXTRecordOwnership configures TXT record-based ownership tracking for DNS records.
+//
+// DNSTXTRecordOwnership creates companion TXT records that identify which cfgate installation
+// owns each DNS record. This enables safe multi-cluster deployments and prevents accidental
+// deletion of records created by other installations. The format aligns with external-dns:
+// heritage=cfgate,cfgate/owner=<owner-id>,cfgate/resource=cloudflaredns/<namespace>/<name>
 type DNSTXTRecordOwnership struct {
 	// Enabled enables TXT record ownership tracking.
 	// nil defaults to true.
@@ -180,7 +233,10 @@ type DNSTXTRecordOwnership struct {
 	Prefix string `json:"prefix,omitempty"`
 }
 
-// DNSCommentOwnership configures comment-based ownership tracking.
+// DNSCommentOwnership configures comment-based ownership tracking in DNS records.
+//
+// DNSCommentOwnership uses the Cloudflare DNS record comment field to mark ownership.
+// This is a lighter-weight alternative to TXT records but provides less granular tracking.
 type DNSCommentOwnership struct {
 	// Enabled enables comment-based ownership tracking.
 	// +kubebuilder:default=false
@@ -192,7 +248,12 @@ type DNSCommentOwnership struct {
 	Template string `json:"template,omitempty"`
 }
 
-// DNSOwnershipConfig defines how to track record ownership.
+// DNSOwnershipConfig defines how record ownership is tracked and verified.
+//
+// DNSOwnershipConfig supports two ownership strategies: TXT records and comments.
+// TXT record ownership is recommended for production use as it provides reliable
+// multi-cluster support. The OwnerID identifies this installation and defaults to
+// the CloudflareDNS resource's namespace/name.
 type DNSOwnershipConfig struct {
 	// OwnerID is the cluster/installation identifier used in TXT ownership records.
 	// Used to distinguish records created by different cfgate installations.
@@ -211,8 +272,11 @@ type DNSOwnershipConfig struct {
 	Comment DNSCommentOwnership `json:"comment,omitempty"`
 }
 
-// DNSCleanupPolicy defines what to do when records are no longer needed.
-// All fields use *bool to distinguish between "not set" (nil, defaults to true) and "explicitly false".
+// DNSCleanupPolicy defines cleanup behavior when records are no longer needed.
+//
+// DNSCleanupPolicy controls what happens to DNS records when source routes are deleted
+// or when the CloudflareDNS resource itself is deleted. All fields use pointer booleans
+// to distinguish between "not set" (nil, defaults to true) and "explicitly false".
 type DNSCleanupPolicy struct {
 	// DeleteOnRouteRemoval deletes records when the source route is deleted.
 	// nil defaults to true.
@@ -230,7 +294,12 @@ type DNSCleanupPolicy struct {
 	OnlyManaged *bool `json:"onlyManaged,omitempty"`
 }
 
-// CloudflareDNSSpec defines the desired state of CloudflareDNS.
+// CloudflareDNSSpec defines the desired state of a CloudflareDNS resource.
+//
+// CloudflareDNSSpec configures DNS record synchronization, including the target
+// (tunnel or external), zones to manage, hostname sources, and ownership tracking.
+// Either tunnelRef or externalTarget must be specified (mutually exclusive).
+//
 // +kubebuilder:validation:XValidation:rule="has(self.tunnelRef) || has(self.externalTarget)",message="either tunnelRef or externalTarget must be specified"
 // +kubebuilder:validation:XValidation:rule="!(has(self.tunnelRef) && has(self.externalTarget))",message="tunnelRef and externalTarget are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="has(self.tunnelRef) || has(self.cloudflare)",message="cloudflare credentials required when using externalTarget"
@@ -281,7 +350,11 @@ type CloudflareDNSSpec struct {
 	FallbackCredentialsRef *SecretReference `json:"fallbackCredentialsRef,omitempty"`
 }
 
-// DNSRecordSyncStatus represents the status of a single DNS record.
+// DNSRecordSyncStatus represents the synchronization status of a single DNS record.
+//
+// DNSRecordSyncStatus tracks individual DNS record state including the Cloudflare record ID,
+// current configuration, and sync status. The Status field indicates: Synced (successfully
+// synchronized), Pending (awaiting sync), or Failed (sync failed, see Error field).
 type DNSRecordSyncStatus struct {
 	// Hostname is the DNS hostname.
 	Hostname string `json:"hostname"`
@@ -314,7 +387,11 @@ type DNSRecordSyncStatus struct {
 	Error string `json:"error,omitempty"`
 }
 
-// CloudflareDNSStatus defines the observed state of CloudflareDNS.
+// CloudflareDNSStatus defines the observed state of a CloudflareDNS resource.
+//
+// CloudflareDNSStatus captures the synchronization state of all DNS records, including
+// counts of synced, pending, and failed records. The ResolvedTarget field shows the
+// actual CNAME target being used (either from tunnel or external target).
 type CloudflareDNSStatus struct {
 	// SyncedRecords is the number of successfully synced records.
 	SyncedRecords int32 `json:"syncedRecords,omitempty"`
@@ -349,6 +426,24 @@ type CloudflareDNSStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
+// CloudflareDNS is the Schema for the cloudflaredns API.
+//
+// CloudflareDNS manages DNS record synchronization independently from CloudflareTunnel resources.
+// It supports two target modes: tunnel references (for tunnel-based CNAME records) and external
+// targets (for non-tunnel DNS management). DNS records can be sourced from Gateway API routes
+// or explicitly defined.
+//
+// CloudflareDNS implements ownership tracking via TXT records (aligned with external-dns patterns)
+// to enable safe multi-cluster deployments and prevent accidental deletion of records created
+// by other installations.
+//
+// Status conditions:
+//   - Ready: DNS sync is fully operational
+//   - CredentialsValid: Cloudflare credentials have been validated
+//   - TargetResolved: Tunnel reference or external target has been resolved
+//   - ZonesDiscovered: All configured zones have been discovered via API
+//   - DNSSynced: DNS records have been synchronized to Cloudflare
+//
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=cfdns;dns
@@ -357,9 +452,6 @@ type CloudflareDNSStatus struct {
 // +kubebuilder:printcolumn:name="Pending",type="integer",JSONPath=".status.pendingRecords"
 // +kubebuilder:printcolumn:name="Failed",type="integer",JSONPath=".status.failedRecords"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-
-// CloudflareDNS is the Schema for the cloudflaredns API.
-// It manages DNS records independently from CloudflareTunnel resources.
 type CloudflareDNS struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -368,9 +460,9 @@ type CloudflareDNS struct {
 	Status CloudflareDNSStatus `json:"status,omitempty"`
 }
 
+// CloudflareDNSList contains a list of CloudflareDNS resources.
+//
 // +kubebuilder:object:root=true
-
-// CloudflareDNSList contains a list of CloudflareDNS.
 type CloudflareDNSList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

@@ -1,4 +1,3 @@
-// Package controller contains the reconciliation logic for cfgate CRDs.
 package controller
 
 import (
@@ -38,10 +37,16 @@ type TCPRouteReconciler struct {
 //
 // SPEC ONLY (alpha.3): This method logs that TCPRoute support is spec-only
 // and returns early without actual processing. Full implementation in v0.2.0.
+//
+// When fully implemented, reconciliation will:
+//  1. Validate cfgate.io/hostname annotation (required for TCPRoute)
+//  2. Validate parent Gateway references
+//  3. Trigger TunnelReconciler to build Spectrum rules
+//  4. Update route status conditions
 func (r *TCPRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := log.FromContext(ctx).WithName("controller").WithName("tcproute")
 
-	log.V(1).Info("TCPRoute reconciliation skipped: spec-only in alpha.3",
+	log.V(1).Info("reconciliation skipped: spec-only in alpha.3",
 		"name", req.Name,
 		"namespace", req.Namespace,
 		"implementationVersion", "v0.2.0",
@@ -71,10 +76,11 @@ func (r *TCPRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 //	    setupLog.Info("TCPRoute controller registered (spec-only in alpha.3)")
 //	}
 func (r *TCPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	log := mgr.GetLogger().WithName("controller").WithName("tcproute")
+
 	// Verify feature gate is enabled (defensive check)
 	if r.FeatureGates != nil && !r.FeatureGates.HasTCPRouteSupport() {
 		// Log and skip registration if CRD not installed
-		log := mgr.GetLogger()
 		log.V(1).Info("TCPRoute CRD not found, skipping controller registration",
 			"requiredVersion", features.V1Alpha2,
 			"installHint", "Install Gateway API experimental channel CRDs",
@@ -82,6 +88,7 @@ func (r *TCPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return nil
 	}
 
+	log.Info("registering controller with manager (spec-only in alpha.3)")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gwapiv1alpha2.TCPRoute{}).
 		Complete(r)

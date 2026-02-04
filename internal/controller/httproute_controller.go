@@ -1,4 +1,3 @@
-// Package controller contains the reconciliation logic for cfgate CRDs.
 package controller
 
 import (
@@ -45,9 +44,20 @@ type HTTPRouteReconciler struct {
 // Reconcile handles the reconciliation loop for HTTPRoute resources.
 // It validates the route against parent Gateways, validates annotations,
 // resolves backend Services, and resolves CloudflareAccessPolicy references.
+//
+// The reconciliation proceeds through these phases:
+//  1. Fetch the HTTPRoute resource
+//  2. Validate cfgate.io/* annotations (emit warnings for deprecated ones)
+//  3. Validate each parentRef against cfgate-managed Gateways
+//  4. Resolve backend Service references
+//  5. Resolve cfgate.io/access-policy reference (if present)
+//  6. Update route status with conditions
+//
+// On error, the controller requeues after 30 seconds. On success, it requeues
+// after 5 minutes for periodic validation.
 func (r *HTTPRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("reconciling HTTPRoute", "name", req.Name, "namespace", req.Namespace)
+	log := log.FromContext(ctx).WithName("controller").WithName("httproute")
+	log.Info("starting reconciliation", "namespace", req.Namespace, "name", req.Name)
 
 	// 1. Fetch HTTPRoute resource
 	var route gwapiv1.HTTPRoute
@@ -104,7 +114,15 @@ func (r *HTTPRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // SetupWithManager sets up the controller with the Manager.
+//
+// Watched resources:
+//   - HTTPRoute (primary resource)
+//   - Gateway (triggers reconciliation of routes referencing changed Gateway)
+//   - Service (triggers reconciliation of routes with changed backend)
+//   - CloudflareAccessPolicy (triggers reconciliation of routes referencing policy)
 func (r *HTTPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	log := mgr.GetLogger().WithName("controller").WithName("httproute")
+	log.Info("registering controller with manager")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gwapiv1.HTTPRoute{}).
 		Watches(

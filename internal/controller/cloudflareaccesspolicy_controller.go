@@ -1,4 +1,3 @@
-// Package controller contains the reconciliation logic for cfgate CRDs.
 package controller
 
 import (
@@ -48,9 +47,18 @@ const (
 	AccessPolicyControllerName = "cfgate.io/cloudflare-tunnel-controller"
 )
 
-// CloudflareAccessPolicyReconciler reconciles a CloudflareAccessPolicy object.
-// It manages the complete Access policy lifecycle: target resolution, application
-// creation, policy sync, and optional service tokens and mTLS configuration.
+// CloudflareAccessPolicyReconciler reconciles CloudflareAccessPolicy resources.
+//
+// It manages the complete Access policy lifecycle including:
+//   - Target resolution (Gateway, HTTPRoute, GRPCRoute, TCPRoute, UDPRoute)
+//   - Cross-namespace reference validation via ReferenceGrant
+//   - Cloudflare Access Application creation and updates
+//   - Access Policy synchronization
+//   - Service token provisioning (optional)
+//   - mTLS certificate configuration (optional)
+//
+// Credentials can be specified explicitly via cloudflareRef or inherited from
+// a CloudflareTunnel referenced by target Gateways.
 type CloudflareAccessPolicyReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -78,9 +86,25 @@ type CloudflareAccessPolicyReconciler struct {
 
 // Reconcile handles the reconciliation loop for CloudflareAccessPolicy resources.
 // It ensures Access Applications and Policies exist in Cloudflare and are synced.
+//
+// The reconciliation proceeds through these phases:
+//  1. Fetch the CloudflareAccessPolicy resource
+//  2. Handle deletion via finalizers (cleanup Access Application)
+//  3. Resolve Cloudflare credentials (explicit or inherited from tunnel)
+//  4. Resolve and validate target references
+//  5. Check ReferenceGrants for cross-namespace targets
+//  6. Ensure Access Application exists in Cloudflare
+//  7. Sync Access Policies to the application
+//  8. Ensure service tokens (if configured)
+//  9. Configure mTLS (if enabled)
+//  10. Update status conditions and ancestor statuses
+//
+// On error, the controller requeues after 30 seconds. On success, it requeues
+// after 5 minutes for periodic policy sync.
 func (r *CloudflareAccessPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("reconciling CloudflareAccessPolicy", "name", req.Name, "namespace", req.Namespace)
+	log := log.FromContext(ctx).WithName("controller").WithName("accesspolicy").
+		WithValues("namespace", req.Namespace, "name", req.Name)
+	log.Info("starting reconciliation")
 
 	// Phase 1: Fetch CloudflareAccessPolicy resource
 	var policy cfgatev1alpha1.CloudflareAccessPolicy
@@ -111,7 +135,9 @@ func (r *CloudflareAccessPolicyReconciler) Reconcile(ctx context.Context, req ct
 	return r.reconcilePhases(ctx, &policy)
 }
 
-// reconcilePhases executes the reconciliation phases for CloudflareAccessPolicy.
+// reconcilePhases executes the main reconciliation phases for CloudflareAccessPolicy.
+// It proceeds through credential resolution, target resolution, ReferenceGrant checks,
+// Access Application management, policy sync, service tokens, and mTLS configuration.
 func (r *CloudflareAccessPolicyReconciler) reconcilePhases(ctx context.Context, policy *cfgatev1alpha1.CloudflareAccessPolicy) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	generation := policy.Generation
@@ -282,7 +308,9 @@ func (r *CloudflareAccessPolicyReconciler) reconcilePhases(ctx context.Context, 
 }
 
 // resolveCredentials resolves Cloudflare credentials for the policy.
-// Uses explicit cloudflareRef or inherits from referenced tunnel.
+// It first checks for explicit cloudflareRef in the spec, then falls back to
+// inheriting credentials from a CloudflareTunnel referenced by target Gateways.
+// Returns an AccessService client, the account ID, or an error if no credentials found.
 func (r *CloudflareAccessPolicyReconciler) resolveCredentials(
 	ctx context.Context,
 	policy *cfgatev1alpha1.CloudflareAccessPolicy,
@@ -332,6 +360,8 @@ func (r *CloudflareAccessPolicyReconciler) resolveCredentials(
 }
 
 // inheritCredentialsFromTunnel finds credentials from Gateway tunnel references.
+// It iterates through Gateway targetRefs, looks for cfgate.io/tunnel-ref annotations,
+// and returns the first tunnel's credentials if found.
 func (r *CloudflareAccessPolicyReconciler) inheritCredentialsFromTunnel(
 	ctx context.Context,
 	policy *cfgatev1alpha1.CloudflareAccessPolicy,
@@ -395,6 +425,8 @@ func (r *CloudflareAccessPolicyReconciler) inheritCredentialsFromTunnel(
 }
 
 // validateTargetKinds validates that all target kinds are supported.
+// It checks FeatureGates for optional route types (GRPCRoute, TCPRoute, UDPRoute)
+// and returns an error if a required CRD is not installed.
 func (r *CloudflareAccessPolicyReconciler) validateTargetKinds(
 	ctx context.Context,
 	policy *cfgatev1alpha1.CloudflareAccessPolicy,
@@ -442,6 +474,8 @@ func (r *CloudflareAccessPolicyReconciler) validateTargetKinds(
 }
 
 // checkReferenceGrants verifies cross-namespace references are permitted.
+// For each target in a different namespace, it checks for a ReferenceGrant that
+// allows CloudflareAccessPolicy from the policy's namespace to reference the target.
 func (r *CloudflareAccessPolicyReconciler) checkReferenceGrants(
 	ctx context.Context,
 	policy *cfgatev1alpha1.CloudflareAccessPolicy,
@@ -489,6 +523,8 @@ func (r *CloudflareAccessPolicyReconciler) checkReferenceGrants(
 }
 
 // grantPermitsAccess checks if a ReferenceGrant permits access from the policy namespace.
+// Returns true if the grant allows CloudflareAccessPolicy from fromNamespace to
+// reference resources of targetKind in the grant's namespace.
 func (r *CloudflareAccessPolicyReconciler) grantPermitsAccess(
 	grant gatewayv1b1.ReferenceGrant,
 	fromNamespace, targetKind string,
@@ -515,6 +551,8 @@ func (r *CloudflareAccessPolicyReconciler) grantPermitsAccess(
 }
 
 // ensureApplication ensures the Access Application exists in Cloudflare.
+// It determines the domain from spec or extracted hostnames, builds the application
+// parameters, and calls EnsureApplication to create or update the application.
 func (r *CloudflareAccessPolicyReconciler) ensureApplication(
 	ctx context.Context,
 	accessService *cloudflare.AccessService,
@@ -569,6 +607,8 @@ func (r *CloudflareAccessPolicyReconciler) ensureApplication(
 }
 
 // syncPolicies synchronizes Access Policies for the application.
+// It converts the CRD policy rules to API parameters and calls SyncPolicies
+// to ensure the Cloudflare application has the correct policies attached.
 func (r *CloudflareAccessPolicyReconciler) syncPolicies(
 	ctx context.Context,
 	accessService *cloudflare.AccessService,
@@ -608,8 +648,12 @@ func (r *CloudflareAccessPolicyReconciler) syncPolicies(
 	return accessService.SyncPolicies(ctx, accountID, appID, params)
 }
 
-// convertAccessRules converts CRD AccessRule to API AccessRuleParam.
-// Implements P0/P1/P2 rule types for alpha.3 (SDK-aligned naming).
+// convertAccessRules converts CRD AccessRule slice to API AccessRuleParam slice.
+// Implements P0/P1/P2 rule types for alpha.3 with SDK-aligned naming:
+//   - P0: No IdP (IP, IPList, Country, Everyone, ServiceToken, AnyValidServiceToken)
+//   - P1: Basic IdP (Email, EmailList, EmailDomain, OIDCClaim)
+//   - P2: Google Workspace (GSuiteGroup)
+//   - P3: Deferred to v0.2.0 (Certificate, Group, GitHub, Azure, Okta, SAML, etc.)
 func convertAccessRules(crdRules []cfgatev1alpha1.AccessRule) []cloudflare.AccessRuleParam {
 	var rules []cloudflare.AccessRuleParam
 	for _, r := range crdRules {
@@ -744,7 +788,8 @@ func convertAccessRules(crdRules []cfgatev1alpha1.AccessRule) []cloudflare.Acces
 	return rules
 }
 
-// convertApprovalGroups converts CRD ApprovalGroup to API ApprovalGroupParam.
+// convertApprovalGroups converts CRD ApprovalGroup slice to API ApprovalGroupParam slice.
+// Each approval group specifies email addresses and the number of approvals needed.
 func convertApprovalGroups(groups []cfgatev1alpha1.ApprovalGroup) []cloudflare.ApprovalGroupParam {
 	var result []cloudflare.ApprovalGroupParam
 	for _, g := range groups {
@@ -756,7 +801,9 @@ func convertApprovalGroups(groups []cfgatev1alpha1.ApprovalGroup) []cloudflare.A
 	return result
 }
 
-// ensureServiceTokens ensures service tokens exist and stores credentials in secrets.
+// ensureServiceTokens ensures service tokens exist and stores credentials in Kubernetes secrets.
+// For each configured service token, it calls EnsureServiceToken and writes the
+// client ID and secret to the referenced Secret with owner references for garbage collection.
 func (r *CloudflareAccessPolicyReconciler) ensureServiceTokens(
 	ctx context.Context,
 	accessService *cloudflare.AccessService,
@@ -804,6 +851,7 @@ func (r *CloudflareAccessPolicyReconciler) ensureServiceTokens(
 }
 
 // k8sSecretWriter implements cloudflare.SecretWriter for Kubernetes secrets.
+// It creates or updates secrets with owner references for garbage collection.
 type k8sSecretWriter struct {
 	client    client.Client
 	namespace string
@@ -812,7 +860,8 @@ type k8sSecretWriter struct {
 	scheme    *runtime.Scheme
 }
 
-// WriteSecret creates or updates a Kubernetes secret with the given data.
+// WriteSecret creates or updates a Kubernetes Secret with the given data.
+// It sets the owner reference to the CloudflareAccessPolicy for automatic cleanup.
 func (w *k8sSecretWriter) WriteSecret(ctx context.Context, name string, data map[string][]byte) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -843,6 +892,8 @@ func (w *k8sSecretWriter) WriteSecret(ctx context.Context, name string, data map
 }
 
 // configureMTLS configures mTLS certificate and hostname associations.
+// It reads the root CA from the referenced secret, uploads it to Cloudflare,
+// and associates the specified hostnames with the mTLS rule.
 func (r *CloudflareAccessPolicyReconciler) configureMTLS(
 	ctx context.Context,
 	accessService *cloudflare.AccessService,
@@ -917,6 +968,9 @@ func (r *CloudflareAccessPolicyReconciler) configureMTLS(
 }
 
 // reconcileDelete handles policy deletion cleanup.
+// It deletes the Access Application (which cascades to policies), revokes service
+// tokens, removes mTLS certificates, and removes the finalizer. Respects the
+// cfgate.io/deletion-policy annotation for orphaning resources.
 func (r *CloudflareAccessPolicyReconciler) reconcileDelete(
 	ctx context.Context,
 	policy *cfgatev1alpha1.CloudflareAccessPolicy,
@@ -983,7 +1037,8 @@ func (r *CloudflareAccessPolicyReconciler) reconcileDelete(
 	return r.removeFinalizer(ctx, policy)
 }
 
-// revokeServiceToken revokes a service token via the API client.
+// revokeServiceToken revokes a service token in Cloudflare.
+// Called during deletion cleanup to remove orphaned tokens.
 func (r *CloudflareAccessPolicyReconciler) revokeServiceToken(
 	ctx context.Context,
 	accessService *cloudflare.AccessService,
@@ -992,7 +1047,8 @@ func (r *CloudflareAccessPolicyReconciler) revokeServiceToken(
 	return accessService.Client().DeleteServiceToken(ctx, accountID, tokenID)
 }
 
-// removeMTLSCertificate removes an mTLS certificate via the API client.
+// removeMTLSCertificate removes an mTLS certificate from Cloudflare.
+// Called during deletion cleanup to remove orphaned certificates.
 func (r *CloudflareAccessPolicyReconciler) removeMTLSCertificate(
 	ctx context.Context,
 	accessService *cloudflare.AccessService,
@@ -1001,7 +1057,8 @@ func (r *CloudflareAccessPolicyReconciler) removeMTLSCertificate(
 	return accessService.Client().DeleteMTLSCertificate(ctx, accountID, certID)
 }
 
-// removeFinalizer removes the finalizer from the policy.
+// removeFinalizer removes the access policy finalizer using a patch operation.
+// This is the final step in deletion reconciliation.
 func (r *CloudflareAccessPolicyReconciler) removeFinalizer(
 	ctx context.Context,
 	policy *cfgatev1alpha1.CloudflareAccessPolicy,
@@ -1014,7 +1071,8 @@ func (r *CloudflareAccessPolicyReconciler) removeFinalizer(
 	return ctrl.Result{}, nil
 }
 
-// updateStatus updates the CloudflareAccessPolicy status.
+// updateStatus updates the CloudflareAccessPolicy status subresource.
+// It re-fetches the resource to avoid conflicts before applying the status update.
 func (r *CloudflareAccessPolicyReconciler) updateStatus(ctx context.Context, policy *cfgatev1alpha1.CloudflareAccessPolicy) error {
 	// Re-fetch to avoid conflicts
 	var current cfgatev1alpha1.CloudflareAccessPolicy
@@ -1032,7 +1090,8 @@ func (r *CloudflareAccessPolicyReconciler) updateStatus(ctx context.Context, pol
 	return nil
 }
 
-// updateAncestorStatuses updates the PolicyAncestorStatus for each target.
+// updateAncestorStatuses updates the PolicyAncestorStatus for each resolved target.
+// This follows the Gateway API pattern for reporting policy acceptance per-target.
 func (r *CloudflareAccessPolicyReconciler) updateAncestorStatuses(
 	policy *cfgatev1alpha1.CloudflareAccessPolicy,
 	policyCtx *ctxwrappers.AccessPolicyContext,
@@ -1074,6 +1133,8 @@ func (r *CloudflareAccessPolicyReconciler) updateAncestorStatuses(
 }
 
 // getCloudflareClient creates a Cloudflare client from credentials.
+// It uses the injected CFClient for testing, otherwise reads from the secret
+// and optionally uses the CredentialCache to avoid repeated client creation.
 func (r *CloudflareAccessPolicyReconciler) getCloudflareClient(
 	ctx context.Context,
 	policyNamespace string,
@@ -1108,7 +1169,8 @@ func (r *CloudflareAccessPolicyReconciler) getCloudflareClient(
 	return r.createClientFromSecret(secret)
 }
 
-// createClientFromSecret creates a Cloudflare client from a secret.
+// createClientFromSecret creates a Cloudflare client from a Kubernetes Secret.
+// It expects the CLOUDFLARE_API_TOKEN key to contain the API token.
 func (r *CloudflareAccessPolicyReconciler) createClientFromSecret(secret *corev1.Secret) (cloudflare.Client, error) {
 	tokenKey := "CLOUDFLARE_API_TOKEN"
 
@@ -1121,7 +1183,21 @@ func (r *CloudflareAccessPolicyReconciler) createClientFromSecret(secret *corev1
 }
 
 // SetupWithManager sets up the controller with the Manager.
+//
+// Watched resources:
+//   - CloudflareAccessPolicy (primary resource)
+//   - Secret (owned, for service token credentials)
+//   - HTTPRoute (for policies targeting HTTPRoute)
+//   - GRPCRoute (conditional, if CRD installed)
+//   - TCPRoute (conditional, if CRD installed)
+//   - UDPRoute (conditional, if CRD installed)
+//   - ReferenceGrant (conditional, for cross-namespace validation)
+//
+// Route watches use GenerationChangedPredicate to filter out status-only updates.
+// Optional CRD watches are registered only if the corresponding FeatureGate is enabled.
 func (r *CloudflareAccessPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	log := mgr.GetLogger().WithName("controller").WithName("accesspolicy")
+	log.Info("registering controller with manager")
 	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&cfgatev1alpha1.CloudflareAccessPolicy{}).
 		Owns(&corev1.Secret{}). // Service token secrets
@@ -1170,27 +1246,29 @@ func (r *CloudflareAccessPolicyReconciler) SetupWithManager(mgr ctrl.Manager) er
 	return controllerBuilder.Complete(r)
 }
 
-// findPoliciesForHTTPRoute returns reconcile requests for policies targeting this HTTPRoute.
+// findPoliciesForHTTPRoute returns reconcile requests for policies targeting the given HTTPRoute.
 func (r *CloudflareAccessPolicyReconciler) findPoliciesForHTTPRoute(ctx context.Context, obj client.Object) []reconcile.Request {
 	return r.findPoliciesForTarget(ctx, "HTTPRoute", obj)
 }
 
-// findPoliciesForGRPCRoute returns reconcile requests for policies targeting this GRPCRoute.
+// findPoliciesForGRPCRoute returns reconcile requests for policies targeting the given GRPCRoute.
 func (r *CloudflareAccessPolicyReconciler) findPoliciesForGRPCRoute(ctx context.Context, obj client.Object) []reconcile.Request {
 	return r.findPoliciesForTarget(ctx, "GRPCRoute", obj)
 }
 
-// findPoliciesForTCPRoute returns reconcile requests for policies targeting this TCPRoute.
+// findPoliciesForTCPRoute returns reconcile requests for policies targeting the given TCPRoute.
 func (r *CloudflareAccessPolicyReconciler) findPoliciesForTCPRoute(ctx context.Context, obj client.Object) []reconcile.Request {
 	return r.findPoliciesForTarget(ctx, "TCPRoute", obj)
 }
 
-// findPoliciesForUDPRoute returns reconcile requests for policies targeting this UDPRoute.
+// findPoliciesForUDPRoute returns reconcile requests for policies targeting the given UDPRoute.
 func (r *CloudflareAccessPolicyReconciler) findPoliciesForUDPRoute(ctx context.Context, obj client.Object) []reconcile.Request {
 	return r.findPoliciesForTarget(ctx, "UDPRoute", obj)
 }
 
-// findPoliciesForTarget finds all policies targeting a specific object.
+// findPoliciesForTarget finds all CloudflareAccessPolicies targeting a specific object.
+// It lists all policies and checks their targetRef/targetRefs for matches by kind,
+// name, and namespace.
 func (r *CloudflareAccessPolicyReconciler) findPoliciesForTarget(ctx context.Context, kind string, obj client.Object) []reconcile.Request {
 	log := log.FromContext(ctx)
 
@@ -1248,7 +1326,9 @@ func (r *CloudflareAccessPolicyReconciler) findPoliciesForTarget(ctx context.Con
 	return requests
 }
 
-// findPoliciesForReferenceGrant returns reconcile requests for policies affected by grant changes.
+// findPoliciesForReferenceGrant returns reconcile requests for policies affected by ReferenceGrant changes.
+// When a ReferenceGrant is created/updated/deleted, policies with cross-namespace references
+// to that namespace need to be re-evaluated.
 func (r *CloudflareAccessPolicyReconciler) findPoliciesForReferenceGrant(ctx context.Context, obj client.Object) []reconcile.Request {
 	log := log.FromContext(ctx)
 	grant, ok := obj.(*gatewayv1b1.ReferenceGrant)

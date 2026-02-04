@@ -1,6 +1,3 @@
-// Package features provides CRD detection and feature flags for optional
-// Gateway API resources, enabling graceful degradation when experimental
-// CRDs are unavailable.
 package features
 
 import (
@@ -25,12 +22,16 @@ const (
 	V1 = "v1"
 )
 
-// Gateway API resource names.
+// Gateway API resource names (plural form used in API discovery).
 const (
-	TCPRouteResource        = "tcproutes"
-	UDPRouteResource        = "udproutes"
-	GRPCRouteResource       = "grpcroutes"
-	ReferenceGrantResource  = "referencegrants"
+	// TCPRouteResource is the plural resource name for TCPRoute.
+	TCPRouteResource = "tcproutes"
+	// UDPRouteResource is the plural resource name for UDPRoute.
+	UDPRouteResource = "udproutes"
+	// GRPCRouteResource is the plural resource name for GRPCRoute.
+	GRPCRouteResource = "grpcroutes"
+	// ReferenceGrantResource is the plural resource name for ReferenceGrant.
+	ReferenceGrantResource = "referencegrants"
 )
 
 // FeatureGates tracks which optional Gateway API CRDs are available.

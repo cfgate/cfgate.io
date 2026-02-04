@@ -1,12 +1,3 @@
-// Package main provides a standalone cleanup tool for orphaned E2E test resources.
-// This tool deletes Cloudflare resources matching the e2e-* prefix.
-//
-// SAFETY: Only deletes resources with e2e-* prefix. Never touches production resources.
-//
-// Usage:
-//
-//	mise exec -- go run ./cmd/cleanup
-//	mise run cleanup
 package main
 
 import (
@@ -24,20 +15,17 @@ import (
 )
 
 const (
-	// E2E prefix that identifies test resources.
-	e2ePrefix = "e2e-"
-
-	// Recovery prefix from E2E tests.
-	recoveryPrefix = "recovery-"
-
-	// Ownership TXT record prefix.
-	ownershipPrefix = "_cfgate.e2e-"
+	e2ePrefix       = "e2e-"          // Identifies E2E test resources
+	recoveryPrefix  = "recovery-"     // Identifies recovery test resources
+	ownershipPrefix = "_cfgate.e2e-"  // Ownership TXT record prefix for E2E
+	cleanupTimeout  = 5 * time.Minute // Maximum time for cleanup operation
 )
 
+// resource represents a Cloudflare resource identified for cleanup.
 type resource struct {
-	ID   string
-	Name string
-	Type string
+	ID   string // Cloudflare resource ID
+	Name string // Resource name (for display)
+	Type string // Resource type: tunnel, dns, access_app, service_token
 }
 
 func main() {
@@ -58,7 +46,7 @@ func main() {
 	fmt.Println()
 
 	cfClient := cloudflare.NewClient(option.WithAPIToken(apiToken))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
 
 	var allResources []resource
@@ -191,6 +179,7 @@ func main() {
 	}
 }
 
+// listOrphanedTunnels finds tunnels with e2e- or recovery- name prefix.
 func listOrphanedTunnels(ctx context.Context, client *cloudflare.Client, accountID string) []resource {
 	var results []resource
 	iter := client.ZeroTrust.Tunnels.Cloudflared.ListAutoPaging(ctx, zero_trust.TunnelCloudflaredListParams{
@@ -211,6 +200,7 @@ func listOrphanedTunnels(ctx context.Context, client *cloudflare.Client, account
 	return results
 }
 
+// listOrphanedDNSRecords finds DNS records with e2e- in name or _cfgate.e2e- prefix.
 func listOrphanedDNSRecords(ctx context.Context, client *cloudflare.Client, zoneName string) []resource {
 	zoneID := getZoneID(ctx, client, zoneName)
 	if zoneID == "" {
@@ -237,6 +227,7 @@ func listOrphanedDNSRecords(ctx context.Context, client *cloudflare.Client, zone
 	return results
 }
 
+// listOrphanedAccessApplications finds Access applications with e2e- name prefix.
 func listOrphanedAccessApplications(ctx context.Context, client *cloudflare.Client, accountID string) []resource {
 	var results []resource
 	iter := client.ZeroTrust.Access.Applications.ListAutoPaging(ctx, zero_trust.AccessApplicationListParams{
@@ -257,6 +248,7 @@ func listOrphanedAccessApplications(ctx context.Context, client *cloudflare.Clie
 	return results
 }
 
+// listOrphanedServiceTokens finds service tokens with e2e- name prefix.
 func listOrphanedServiceTokens(ctx context.Context, client *cloudflare.Client, accountID string) []resource {
 	var results []resource
 	iter := client.ZeroTrust.Access.ServiceTokens.ListAutoPaging(ctx, zero_trust.AccessServiceTokenListParams{
@@ -277,6 +269,7 @@ func listOrphanedServiceTokens(ctx context.Context, client *cloudflare.Client, a
 	return results
 }
 
+// getZoneID resolves a zone name to its Cloudflare zone ID.
 func getZoneID(ctx context.Context, client *cloudflare.Client, zoneName string) string {
 	zoneList, err := client.Zones.List(ctx, zones.ZoneListParams{
 		Name: cloudflare.F(zoneName),
@@ -288,8 +281,9 @@ func getZoneID(ctx context.Context, client *cloudflare.Client, zoneName string) 
 	return zoneList.Result[0].ID
 }
 
+// deleteTunnel removes a tunnel after clearing its connections.
 func deleteTunnel(ctx context.Context, client *cloudflare.Client, accountID, tunnelID string) error {
-	// Delete connections first.
+	// Connections must be deleted before tunnel deletion succeeds.
 	_, _ = client.ZeroTrust.Tunnels.Cloudflared.Connections.Delete(ctx, tunnelID, zero_trust.TunnelCloudflaredConnectionDeleteParams{
 		AccountID: cloudflare.F(accountID),
 	})
@@ -304,6 +298,7 @@ func deleteTunnel(ctx context.Context, client *cloudflare.Client, accountID, tun
 	return nil
 }
 
+// deleteDNSRecord removes a DNS record by ID, ignoring not-found errors.
 func deleteDNSRecord(ctx context.Context, client *cloudflare.Client, zoneID, recordID string) error {
 	_, err := client.DNS.Records.Delete(ctx, recordID, dns.RecordDeleteParams{
 		ZoneID: cloudflare.F(zoneID),
@@ -314,6 +309,7 @@ func deleteDNSRecord(ctx context.Context, client *cloudflare.Client, zoneID, rec
 	return nil
 }
 
+// deleteAccessApplication removes an Access application by ID.
 func deleteAccessApplication(ctx context.Context, client *cloudflare.Client, accountID, appID string) error {
 	_, err := client.ZeroTrust.Access.Applications.Delete(ctx, appID, zero_trust.AccessApplicationDeleteParams{
 		AccountID: cloudflare.F(accountID),
@@ -324,6 +320,7 @@ func deleteAccessApplication(ctx context.Context, client *cloudflare.Client, acc
 	return nil
 }
 
+// deleteServiceToken removes a service token by ID.
 func deleteServiceToken(ctx context.Context, client *cloudflare.Client, accountID, tokenID string) error {
 	_, err := client.ZeroTrust.Access.ServiceTokens.Delete(ctx, tokenID, zero_trust.AccessServiceTokenDeleteParams{
 		AccountID: cloudflare.F(accountID),

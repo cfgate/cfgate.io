@@ -1,4 +1,3 @@
-// Package cloudflare provides a wrapper around cloudflare-go for cfgate's needs.
 package cloudflare
 
 import (
@@ -9,14 +8,16 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// AccessService handles Access-specific operations.
-// It wraps the cloudflare-go client with cfgate-specific logic.
+// AccessService handles Cloudflare Access operations including applications, policies,
+// service tokens, and mTLS certificates. It wraps the Client interface with cfgate-specific
+// logic for idempotent ensure operations and declarative policy synchronization.
 type AccessService struct {
 	client Client
 	log    logr.Logger
 }
 
-// NewAccessService creates a new AccessService.
+// NewAccessService creates a new AccessService with the given client and logger.
+// The logger is named "access-service" for structured logging context.
 func NewAccessService(client Client, log logr.Logger) *AccessService {
 	return &AccessService{
 		client: client,
@@ -24,8 +25,10 @@ func NewAccessService(client Client, log logr.Logger) *AccessService {
 	}
 }
 
-// SecretWriter is an interface for storing secrets.
+// SecretWriter is an interface for storing secrets in Kubernetes.
+// Used by EnsureServiceToken to persist client credentials.
 type SecretWriter interface {
+	// WriteSecret creates or updates a secret with the given name and data.
 	WriteSecret(ctx context.Context, name string, data map[string][]byte) error
 }
 
@@ -667,7 +670,8 @@ func (s *AccessService) SyncPolicies(ctx context.Context, accountID, appID strin
 	return resultIDs, nil
 }
 
-// policiesEqual checks if a policy matches the desired params.
+// policiesEqual checks if an existing policy matches desired params.
+// Uses simplified comparison by rule count rather than deep equality.
 func policiesEqual(existing *AccessPolicy, desired *CreatePolicyParams) bool {
 	if existing.Name != desired.Name {
 		return false

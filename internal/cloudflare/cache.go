@@ -1,4 +1,3 @@
-// Package cloudflare provides a wrapper around cloudflare-go for cfgate's needs.
 package cloudflare
 
 import (
@@ -23,10 +22,10 @@ type CredentialCache struct {
 	ttl     time.Duration
 }
 
-// cacheEntry stores a cached client and its expiration time.
+// cacheEntry stores a cached client with its expiration time.
 type cacheEntry struct {
-	client    Client
-	expiresAt time.Time
+	client    Client    // The cached Cloudflare client
+	expiresAt time.Time // When this entry expires
 }
 
 // NewCredentialCache creates a new CredentialCache with the specified TTL.
@@ -40,8 +39,8 @@ func NewCredentialCache(ttl time.Duration) *CredentialCache {
 	}
 }
 
-// cacheKey generates a cache key from a secret's UID and ResourceVersion.
-// This ensures cache invalidation when the secret is updated.
+// cacheKey generates a cache key from secret UID and ResourceVersion.
+// The combination ensures automatic invalidation when the secret changes.
 func cacheKey(secret *corev1.Secret) string {
 	return string(secret.UID) + ":" + secret.ResourceVersion
 }

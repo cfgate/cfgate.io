@@ -1,4 +1,3 @@
-// Package controller contains the reconciliation logic for cfgate CRDs.
 package controller
 
 import (
@@ -35,12 +34,18 @@ type UDPRouteReconciler struct {
 // Reconcile handles the reconciliation loop for UDPRoute resources.
 // NOTE: This is a stub for alpha.3 - returns early without processing.
 // Full implementation deferred to v0.2.0.
+//
+// When fully implemented, reconciliation will:
+//  1. Validate cfgate.io/hostname annotation (required for UDPRoute)
+//  2. Validate parent Gateway references
+//  3. Trigger TunnelReconciler to build Spectrum rules
+//  4. Update route status conditions
 func (r *UDPRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := log.FromContext(ctx).WithName("controller").WithName("udproute")
 
 	// alpha.3: Log spec-only status and return early.
 	// Full reconciliation logic will be implemented in v0.2.0.
-	log.V(1).Info("UDPRoute support is spec-only in alpha.3, skipping reconciliation",
+	log.V(1).Info("reconciliation skipped: spec-only in alpha.3",
 		"name", req.Name,
 		"namespace", req.Namespace,
 		"implementationVersion", "v0.2.0",
@@ -56,12 +61,11 @@ func (r *UDPRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 // NOTE: In alpha.3, this registers a no-op controller for API compatibility.
 // Full implementation in v0.2.0 will add proper watches and reconciliation.
 func (r *UDPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	log := mgr.GetLogger().WithName("controller").WithName("udproute")
+
 	// Check feature gate - skip registration if UDPRoute CRD not installed
 	if r.FeatureGates != nil && !r.FeatureGates.HasUDPRouteSupport() {
-		// This shouldn't happen if main.go checks gates properly,
-		// but log a warning just in case.
-		setupLog := ctrl.Log.WithName("setup")
-		setupLog.Info("UDPRoute CRD not available, skipping controller registration")
+		log.V(1).Info("UDPRoute CRD not available, skipping controller registration")
 		return nil
 	}
 
@@ -76,5 +80,6 @@ func (r *UDPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// Note: Not registering any watches in alpha.3.
 	// v0.2.0 will add: For(&gwapiv1alpha2.UDPRoute{})
+	log.Info("registering controller with manager (spec-only in alpha.3)")
 	return nil
 }

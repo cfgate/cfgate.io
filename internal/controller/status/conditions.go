@@ -1,5 +1,3 @@
-// Package status provides condition management utilities for cfgate controllers.
-// It adapts patterns from Envoy Gateway for consistent status handling across CRDs.
 package status
 
 import (

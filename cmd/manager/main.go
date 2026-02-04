@@ -1,5 +1,3 @@
-// Package main is the entry point for the cfgate controller manager.
-// It initializes the manager, registers controllers, and starts the reconciliation loop.
 package main
 
 import (
@@ -8,10 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/viper"
-
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	_ "k8s.io/client-go/plugin/pkg/client/auth" // Import all auth plugins for exec-entrypoint
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -26,6 +21,9 @@ import (
 	"cfgate.io/cfgate/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
+
+// Version is set via ldflags at build time (e.g., -ldflags "-X main.Version=v0.1.0").
+var Version = "dev"
 
 var (
 	scheme   = runtime.NewScheme()
@@ -73,6 +71,16 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Log startup configuration. Key-value pairs follow logr conventions.
+	setupLog.Info("starting cfgate controller manager",
+		"version", Version,
+		"metricsAddr", metricsAddr,
+		"healthProbeAddr", probeAddr,
+		"leaderElection", enableLeaderElection,
+		"secureMetrics", secureMetrics,
+		"http2Enabled", enableHTTP2,
+	)
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -124,6 +132,15 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "HTTPRoute")
 		os.Exit(1)
 	}
+
+	if err = (&controller.CloudflareAccessPolicyReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorder("cloudflareaccesspolicy-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "CloudflareAccessPolicy")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -135,9 +152,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
+	setupLog.Info("all controllers registered, starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.Error(err, "manager stopped with error")
 		os.Exit(1)
 	}
+	setupLog.Info("manager shutdown complete")
 }

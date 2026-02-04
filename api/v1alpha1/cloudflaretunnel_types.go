@@ -6,11 +6,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// TunnelIdentity defines the tunnel identification configuration.
-// Uses a single idempotent pathway: resolve by name, create if not exists.
+// TunnelIdentity defines the tunnel identification configuration for CloudflareTunnel.
+//
+// TunnelIdentity uses a single idempotent pathway: the controller resolves the tunnel
+// by name and creates it if it does not exist. The resolved tunnel ID is stored in the
+// CloudflareTunnelStatus after resolution. This design ensures that multiple CloudflareTunnel
+// resources with the same tunnel name will adopt the same Cloudflare tunnel rather than
+// creating duplicates.
 type TunnelIdentity struct {
 	// Name is the tunnel name in Cloudflare. If tunnel with this name exists, adopt it.
 	// If not, create it. Tunnel ID is stored in status after resolution/creation.
@@ -21,7 +23,17 @@ type TunnelIdentity struct {
 	Name string `json:"name"`
 }
 
-// CloudflareConfig defines the Cloudflare API credentials configuration.
+// CloudflareConfig defines the Cloudflare API credentials configuration for tunnel operations.
+//
+// CloudflareConfig requires either AccountID or AccountName to identify the Cloudflare account.
+// When AccountName is specified, the controller performs an API lookup to resolve the account ID.
+// The resolved ID is cached in CloudflareTunnelStatus.AccountID for subsequent reconciliations.
+//
+// The SecretRef must reference a Kubernetes Secret containing a Cloudflare API token with
+// the following permissions:
+//   - Account -> Cloudflare Tunnel -> Edit (required)
+//   - Account -> Account Settings -> Read (required if using AccountName)
+//
 // +kubebuilder:validation:XValidation:rule="has(self.accountId) || has(self.accountName)",message="either accountId or accountName must be specified"
 type CloudflareConfig struct {
 	// AccountID is the Cloudflare Account ID.
@@ -44,7 +56,10 @@ type CloudflareConfig struct {
 	SecretKeys SecretKeys `json:"secretKeys,omitempty"`
 }
 
-// SecretRef references a Kubernetes Secret.
+// SecretRef references a Kubernetes Secret containing Cloudflare API credentials.
+//
+// SecretRef is used to locate the Secret containing the Cloudflare API token.
+// The Namespace field defaults to the referencing resource's namespace if omitted.
 type SecretRef struct {
 	// Name of the secret.
 	// +kubebuilder:validation:Required
@@ -58,8 +73,11 @@ type SecretRef struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// SecretReference references a secret in a namespace.
-// Used for fallback credentials which may be in a different namespace.
+// SecretReference references a Kubernetes Secret for fallback credentials.
+//
+// SecretReference is used for fallback credentials that enable cleanup of Cloudflare
+// resources when the primary credentials secret has been deleted. This supports
+// scenarios where tunnel credentials are managed separately from operator credentials.
 type SecretReference struct {
 	// Name of the secret.
 	// +kubebuilder:validation:Required
@@ -73,7 +91,10 @@ type SecretReference struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// SecretKeys defines the key mappings within the credentials secret.
+// SecretKeys defines the key names for credentials within a Kubernetes Secret.
+//
+// SecretKeys allows customization of the key names used to retrieve credentials
+// from the referenced Secret. The default key name is CLOUDFLARE_API_TOKEN.
 type SecretKeys struct {
 	// APIToken is the key name for the Cloudflare API token.
 	// +kubebuilder:default=CLOUDFLARE_API_TOKEN
@@ -81,7 +102,12 @@ type SecretKeys struct {
 	APIToken string `json:"apiToken,omitempty"`
 }
 
-// CloudflaredConfig defines the cloudflared deployment configuration.
+// CloudflaredConfig defines the cloudflared daemon deployment configuration.
+//
+// CloudflaredConfig controls how the cloudflared connector pods are deployed in the cluster.
+// The controller creates a Deployment with the specified replicas, image, and resource
+// requirements. Each replica establishes an independent connection to Cloudflare's edge
+// network for high availability.
 type CloudflaredConfig struct {
 	// Replicas is the number of cloudflared replicas.
 	// +kubebuilder:validation:Minimum=1
@@ -133,7 +159,10 @@ type CloudflaredConfig struct {
 	Metrics MetricsConfig `json:"metrics,omitempty"`
 }
 
-// MetricsConfig defines the metrics endpoint configuration.
+// MetricsConfig defines the cloudflared metrics endpoint configuration.
+//
+// MetricsConfig controls the Prometheus-compatible metrics endpoint exposed by cloudflared.
+// When enabled, metrics are available at http://localhost:{Port}/metrics on each cloudflared pod.
 type MetricsConfig struct {
 	// Enabled enables the metrics endpoint.
 	// +kubebuilder:default=true
@@ -146,7 +175,11 @@ type MetricsConfig struct {
 	Port int32 `json:"port,omitempty"`
 }
 
-// OriginDefaults defines default settings for origin connections.
+// OriginDefaults defines default settings for origin (backend) connections.
+//
+// OriginDefaults configures how cloudflared connects to backend services in the cluster.
+// These settings apply to all ingress rules unless overridden by route-specific annotations.
+// Use NoTLSVerify with caution in production environments.
 type OriginDefaults struct {
 	// ConnectTimeout is the timeout for connecting to the origin.
 	// +kubebuilder:default="30s"
@@ -166,7 +199,10 @@ type OriginDefaults struct {
 	CAPoolSecretRef *CAPoolSecretRef `json:"caPoolSecretRef,omitempty"`
 }
 
-// CAPoolSecretRef references a Secret containing CA certificates.
+// CAPoolSecretRef references a Kubernetes Secret containing CA certificates for origin verification.
+//
+// CAPoolSecretRef is used when backend services use TLS certificates signed by a private CA.
+// The referenced Secret must contain the CA certificate chain in PEM format.
 type CAPoolSecretRef struct {
 	// Name of the secret.
 	// +kubebuilder:validation:Required
@@ -180,7 +216,11 @@ type CAPoolSecretRef struct {
 	Key string `json:"key,omitempty"`
 }
 
-// CloudflareTunnelSpec defines the desired state of CloudflareTunnel.
+// CloudflareTunnelSpec defines the desired state of a CloudflareTunnel resource.
+//
+// CloudflareTunnelSpec configures the tunnel identity, Cloudflare credentials, cloudflared
+// deployment settings, and origin connection defaults. The tunnel manages lifecycle only;
+// DNS records are managed separately via CloudflareDNS resources.
 type CloudflareTunnelSpec struct {
 	// Tunnel defines the tunnel identity configuration.
 	// +kubebuilder:validation:Required
@@ -210,7 +250,11 @@ type CloudflareTunnelSpec struct {
 	FallbackCredentialsRef *SecretReference `json:"fallbackCredentialsRef,omitempty"`
 }
 
-// CloudflareTunnelStatus defines the observed state of CloudflareTunnel.
+// CloudflareTunnelStatus defines the observed state of a CloudflareTunnel resource.
+//
+// CloudflareTunnelStatus captures the tunnel's Cloudflare-assigned identifiers, deployment
+// status, and reconciliation state. The TunnelDomain field provides the CNAME target
+// ({tunnelId}.cfargotunnel.com) that CloudflareDNS uses for DNS record creation.
 type CloudflareTunnelStatus struct {
 	// TunnelID is the Cloudflare tunnel ID.
 	TunnelID string `json:"tunnelId,omitempty"`
@@ -248,6 +292,23 @@ type CloudflareTunnelStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
+// CloudflareTunnel is the Schema for the cloudflaretunnels API.
+//
+// CloudflareTunnel manages the lifecycle of a Cloudflare Tunnel and its cloudflared daemon
+// deployment. It handles tunnel creation or adoption, credential management, and deploys
+// cloudflared pods that establish secure connections to Cloudflare's edge network.
+//
+// CloudflareTunnel follows a composable architecture where tunnel lifecycle is separate from
+// DNS management. Use CloudflareDNS with a tunnelRef to create DNS records pointing to this
+// tunnel's domain.
+//
+// Status conditions:
+//   - Ready: tunnel is fully operational
+//   - CredentialsValid: API credentials have been validated
+//   - TunnelCreated: tunnel exists in Cloudflare
+//   - ConfigurationSynced: ingress configuration is synced
+//   - DeploymentReady: cloudflared pods are running
+//
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=cft;cftunnel
@@ -255,9 +316,6 @@ type CloudflareTunnelStatus struct {
 // +kubebuilder:printcolumn:name="Tunnel ID",type="string",JSONPath=".status.tunnelId"
 // +kubebuilder:printcolumn:name="Replicas",type="integer",JSONPath=".status.readyReplicas"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-
-// CloudflareTunnel is the Schema for the cloudflaretunnels API.
-// It manages the Cloudflare Tunnel lifecycle independent of routing.
 type CloudflareTunnel struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -266,9 +324,9 @@ type CloudflareTunnel struct {
 	Status CloudflareTunnelStatus `json:"status,omitempty"`
 }
 
+// CloudflareTunnelList contains a list of CloudflareTunnel resources.
+//
 // +kubebuilder:object:root=true
-
-// CloudflareTunnelList contains a list of CloudflareTunnel.
 type CloudflareTunnelList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

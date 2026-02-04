@@ -1,4 +1,3 @@
-// Package controller contains the reconciliation logic for cfgate CRDs.
 package controller
 
 import (
@@ -92,9 +91,21 @@ type CloudflareTunnelReconciler struct {
 
 // Reconcile handles the reconciliation loop for CloudflareTunnel resources.
 // It ensures the Cloudflare tunnel exists, deploys cloudflared, and syncs configuration.
+//
+// The reconciliation proceeds through these phases:
+//  1. Fetch the CloudflareTunnel resource
+//  2. Handle deletion via finalizers (cleanup tunnel from Cloudflare)
+//  3. Validate Cloudflare API credentials
+//  4. Ensure tunnel exists in Cloudflare (create or adopt)
+//  5. Deploy cloudflared connector (Deployment + Secret)
+//  6. Sync ingress configuration from Gateway/HTTPRoute resources
+//  7. Update status conditions
+//
+// On error, the controller requeues after 30 seconds. On success, it requeues
+// after 5 minutes for periodic configuration sync.
 func (r *CloudflareTunnelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("reconciling CloudflareTunnel", "name", req.Name, "namespace", req.Namespace)
+	log := log.FromContext(ctx).WithName("controller").WithName("tunnel")
+	log.Info("starting reconciliation", "namespace", req.Namespace, "name", req.Name)
 
 	// 1. Fetch CloudflareTunnel resource
 	var tunnel cfgatev1alpha1.CloudflareTunnel
@@ -192,7 +203,19 @@ func (r *CloudflareTunnelReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 // SetupWithManager sets up the controller with the Manager.
 // It configures watches for CloudflareTunnel and owned resources.
+//
+// Watched resources:
+//   - CloudflareTunnel (primary resource)
+//   - Deployment (owned, for cloudflared)
+//   - Secret (owned, for tunnel token)
+//   - Gateway (via annotation cfgate.io/tunnel-ref)
+//   - HTTPRoute (via parent Gateway reference)
+//
+// Gateway and HTTPRoute watches use GenerationChangedPredicate to prevent
+// reconciliation loops from status-only updates.
 func (r *CloudflareTunnelReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	log := mgr.GetLogger().WithName("controller").WithName("tunnel")
+	log.Info("registering controller with manager")
 	r.APIReader = mgr.GetAPIReader()
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -321,7 +344,7 @@ func (r *CloudflareTunnelReconciler) ensureTunnel(ctx context.Context, tunnel *c
 		return fmt.Errorf("failed to create Cloudflare client: %w", err)
 	}
 
-	tunnelService := cloudflare.NewTunnelService(cfClient)
+	tunnelService := cloudflare.NewTunnelService(cfClient, log)
 	accountID, err := r.resolveAccountID(ctx, cfClient, tunnel)
 	if err != nil {
 		return fmt.Errorf("failed to resolve account: %w", err)
@@ -364,7 +387,7 @@ func (r *CloudflareTunnelReconciler) deployCloudflared(ctx context.Context, tunn
 		return fmt.Errorf("failed to create Cloudflare client: %w", err)
 	}
 
-	tunnelService := cloudflare.NewTunnelService(cfClient)
+	tunnelService := cloudflare.NewTunnelService(cfClient, log)
 	accountID, err := r.resolveAccountID(ctx, cfClient, tunnel)
 	if err != nil {
 		return fmt.Errorf("failed to resolve account: %w", err)
@@ -491,7 +514,7 @@ func (r *CloudflareTunnelReconciler) syncConfiguration(ctx context.Context, tunn
 		return fmt.Errorf("failed to create Cloudflare client: %w", err)
 	}
 
-	tunnelService := cloudflare.NewTunnelService(cfClient)
+	tunnelService := cloudflare.NewTunnelService(cfClient, log)
 	accountID, err := r.resolveAccountID(ctx, cfClient, tunnel)
 	if err != nil {
 		return fmt.Errorf("failed to resolve account: %w", err)
@@ -618,8 +641,8 @@ func (r *CloudflareTunnelReconciler) buildRulesFromHTTPRoute(route *gateway.HTTP
 	return rules
 }
 
-// reconcileDelete handles tunnel deletion.
-// Deletes tunnel connections, the tunnel itself (unless orphaned), and removes finalizer.
+// reconcileDelete handles CloudflareTunnel deletion by deleting tunnel connections,
+// the tunnel itself (unless orphan policy set), and removing the finalizer.
 // Uses fallback credentials if primary credentials are unavailable.
 func (r *CloudflareTunnelReconciler) reconcileDelete(ctx context.Context, tunnel *cfgatev1alpha1.CloudflareTunnel) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
@@ -646,7 +669,7 @@ func (r *CloudflareTunnelReconciler) reconcileDelete(ctx context.Context, tunnel
 				"Tunnel %s may be orphaned on Cloudflare: %v", tunnel.Status.TunnelID, err)
 			// Continue with finalizer removal - don't block deletion
 		} else {
-			tunnelService := cloudflare.NewTunnelService(cfClient)
+			tunnelService := cloudflare.NewTunnelService(cfClient, log)
 			accountID, err := r.resolveAccountID(ctx, cfClient, tunnel)
 			if err != nil {
 				log.Error(err, "failed to resolve account for deletion, using cached accountID")
@@ -678,8 +701,8 @@ func (r *CloudflareTunnelReconciler) reconcileDelete(ctx context.Context, tunnel
 	return ctrl.Result{}, nil
 }
 
-// updateStatus updates the CloudflareTunnel status.
-// Re-fetches the resource to avoid conflicts before updating.
+// updateStatus updates the CloudflareTunnel status, re-fetching the resource
+// first to avoid update conflicts from concurrent modifications.
 func (r *CloudflareTunnelReconciler) updateStatus(ctx context.Context, tunnel *cfgatev1alpha1.CloudflareTunnel) error {
 	// Re-fetch to avoid conflicts
 	var current cfgatev1alpha1.CloudflareTunnel
@@ -697,8 +720,8 @@ func (r *CloudflareTunnelReconciler) updateStatus(ctx context.Context, tunnel *c
 	return nil
 }
 
-// getCloudflareClient creates or returns the Cloudflare client.
-// Uses credential cache to avoid repeated API validations.
+// getCloudflareClient returns a Cloudflare client for the tunnel, creating one
+// if needed. Uses credential cache to avoid repeated API validations.
 func (r *CloudflareTunnelReconciler) getCloudflareClient(ctx context.Context, tunnel *cfgatev1alpha1.CloudflareTunnel) (cloudflare.Client, error) {
 	// If injected client exists, use it (for testing)
 	if r.CFClient != nil {
@@ -743,8 +766,8 @@ func (r *CloudflareTunnelReconciler) createClientFromSecret(secret *corev1.Secre
 	return cloudflare.NewClient(string(token))
 }
 
-// getCloudflareClientForDeletion tries primary credentials, then fallback credentials.
-// Used during deletion when the primary secret may have been deleted.
+// getCloudflareClientForDeletion returns a Cloudflare client for tunnel deletion,
+// trying primary credentials first then fallback if the primary secret was deleted.
 func (r *CloudflareTunnelReconciler) getCloudflareClientForDeletion(ctx context.Context, tunnel *cfgatev1alpha1.CloudflareTunnel) (cloudflare.Client, error) {
 	log := log.FromContext(ctx)
 
@@ -791,8 +814,8 @@ func (r *CloudflareTunnelReconciler) getCloudflareClientForDeletion(ctx context.
 	return cloudflare.NewClient(string(token))
 }
 
-// resolveAccountID returns the Cloudflare account ID, resolving from accountName if needed.
-// Priority: spec.cloudflare.accountId > status.accountId (cached) > resolve from accountName
+// resolveAccountID returns the Cloudflare account ID with priority:
+// spec.cloudflare.accountId > status.accountId (cached) > resolve from accountName via API.
 func (r *CloudflareTunnelReconciler) resolveAccountID(ctx context.Context, cfClient cloudflare.Client, tunnel *cfgatev1alpha1.CloudflareTunnel) (string, error) {
 	// If accountId is explicitly set in spec, use it
 	if tunnel.Spec.Cloudflare.AccountID != "" {

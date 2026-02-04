@@ -1,4 +1,3 @@
-// Package controller contains the reconciliation logic for cfgate CRDs.
 package controller
 
 import (
@@ -38,8 +37,8 @@ const (
 	dnsDefaultOwnershipPrefix = "_cfgate"
 )
 
-// HostnameConfig holds per-hostname DNS configuration from route annotations.
-// Used to pass TTL and Proxied settings from HTTPRoute annotations to syncRecords.
+// HostnameConfig holds per-hostname DNS configuration from route annotations,
+// passing TTL and Proxied settings from HTTPRoute annotations to syncRecords.
 type HostnameConfig struct {
 	// TTL is the DNS record TTL in seconds (0 means use default)
 	TTL int32
@@ -47,7 +46,8 @@ type HostnameConfig struct {
 	Proxied *bool
 }
 
-// hostnameKeys extracts hostname strings from a HostnameConfig map.
+// hostnameKeys extracts hostname strings from a HostnameConfig map for functions
+// that only need the list of hostnames without per-hostname configuration.
 func hostnameKeys(configs map[string]HostnameConfig) []string {
 	keys := make([]string, 0, len(configs))
 	for k := range configs {
@@ -80,12 +80,23 @@ type CloudflareDNSReconciler struct {
 
 // Reconcile handles the reconciliation loop for CloudflareDNS resources.
 // It collects hostnames from routes, resolves zones, and syncs DNS records.
+//
+// The reconciliation proceeds through these phases:
+//  1. Fetch the CloudflareDNS resource
+//  2. Handle deletion via finalizers (cleanup DNS records)
+//  3. Resolve target (tunnel domain or external target)
+//  4. Collect hostnames from explicit config and Gateway routes
+//  5. Validate Cloudflare API credentials
+//  6. Resolve zone names to zone IDs
+//  7. Sync DNS records with conflict detection
+//  8. Verify ownership TXT records (if enabled)
+//  9. Update status conditions
+//
+// On error, the controller requeues after 30 seconds. On success, it requeues
+// after 5 minutes for periodic DNS sync.
 func (r *CloudflareDNSReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
-	logger.Info("reconciling CloudflareDNS",
-		"name", req.Name,
-		"namespace", req.Namespace,
-	)
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
+	logger.Info("starting reconciliation", "namespace", req.Namespace, "name", req.Name)
 
 	// 1. Fetch CloudflareDNS resource
 	var dns cfgatev1alpha1.CloudflareDNS
@@ -200,7 +211,17 @@ func (r *CloudflareDNSReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 // SetupWithManager sets up the controller with the Manager.
 // Uses GenerationChangedPredicate to avoid reconciling on status-only updates,
 // which prevents the 1-second reconciliation loop caused by status updates.
+//
+// Watched resources:
+//   - CloudflareDNS (primary resource)
+//   - CloudflareTunnel (via spec.tunnelRef)
+//   - HTTPRoute (for hostname collection when gatewayRoutes.enabled)
+//   - Gateway (for hostname collection via tunnel reference)
+//
+// All watches use GenerationChangedPredicate to filter out status-only updates.
 func (r *CloudflareDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	log := mgr.GetLogger().WithName("controller").WithName("dns")
+	log.Info("registering controller with manager")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cfgatev1alpha1.CloudflareDNS{},
 			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
@@ -226,7 +247,7 @@ func (r *CloudflareDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // findAffectedDNSByTunnel finds all CloudflareDNS resources that reference
 // the given CloudflareTunnel via spec.tunnelRef.
 func (r *CloudflareDNSReconciler) findAffectedDNSByTunnel(ctx context.Context, obj client.Object) []reconcile.Request {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
 	tunnel, ok := obj.(*cfgatev1alpha1.CloudflareTunnel)
 	if !ok {
@@ -274,7 +295,7 @@ func (r *CloudflareDNSReconciler) findAffectedDNSByTunnel(ctx context.Context, o
 // findAffectedDNSByRoute finds all CloudflareDNS resources that may be affected
 // by a change to an HTTPRoute.
 func (r *CloudflareDNSReconciler) findAffectedDNSByRoute(ctx context.Context, obj client.Object) []reconcile.Request {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
 	// List all CloudflareDNS resources with gatewayRoutes enabled
 	var dnsList cfgatev1alpha1.CloudflareDNSList
@@ -308,7 +329,7 @@ func (r *CloudflareDNSReconciler) findAffectedDNSByRoute(ctx context.Context, ob
 // findAffectedDNSByGateway finds all CloudflareDNS resources that may be affected
 // by a change to a Gateway.
 func (r *CloudflareDNSReconciler) findAffectedDNSByGateway(ctx context.Context, obj client.Object) []reconcile.Request {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
 	// List all CloudflareDNS resources with gatewayRoutes enabled
 	var dnsList cfgatev1alpha1.CloudflareDNSList
@@ -517,7 +538,7 @@ func (r *CloudflareDNSReconciler) resolveZones(ctx context.Context, dns *cfgatev
 // Compares desired state with actual state and applies changes respecting policy.
 // The hostnameConfigs map provides per-hostname TTL and Proxied settings from route annotations.
 func (r *CloudflareDNSReconciler) syncRecords(ctx context.Context, dns *cfgatev1alpha1.CloudflareDNS, target string, hostnameConfigs map[string]HostnameConfig, zones map[string]string, dnsService *cloudflare.DNSService) error {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
 	ownershipPrefix := dns.Spec.Ownership.TXTRecord.Prefix
 	if ownershipPrefix == "" {
@@ -661,7 +682,7 @@ func (r *CloudflareDNSReconciler) syncRecords(ctx context.Context, dns *cfgatev1
 
 // deleteOrphanedRecords deletes records that were previously synced but are no longer wanted.
 func (r *CloudflareDNSReconciler) deleteOrphanedRecords(ctx context.Context, dns *cfgatev1alpha1.CloudflareDNS, hostnames []string, zones map[string]string, dnsService *cloudflare.DNSService, ownerID, ownershipPrefix string) error {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
 	for _, prevRecord := range dns.Status.Records {
 		found := false
@@ -748,7 +769,8 @@ func (r *CloudflareDNSReconciler) verifyOwnership(ctx context.Context, dns *cfga
 	return true, nil
 }
 
-// shouldCreateTXTRecords returns true if TXT ownership tracking is enabled.
+// shouldCreateTXTRecords reports whether TXT ownership tracking is enabled
+// (defaults to true if not explicitly disabled).
 func (r *CloudflareDNSReconciler) shouldCreateTXTRecords(dns *cfgatev1alpha1.CloudflareDNS) bool {
 	if dns.Spec.Ownership.TXTRecord.Enabled == nil {
 		return true // default enabled
@@ -756,10 +778,11 @@ func (r *CloudflareDNSReconciler) shouldCreateTXTRecords(dns *cfgatev1alpha1.Clo
 	return *dns.Spec.Ownership.TXTRecord.Enabled
 }
 
-// reconcileDelete handles deletion of CloudflareDNS.
-// Uses fallback credentials if the tunnel's credentials are unavailable.
+// reconcileDelete handles deletion of CloudflareDNS, cleaning up DNS records
+// from Cloudflare if policy allows. Uses fallback credentials if the tunnel's
+// credentials are unavailable.
 func (r *CloudflareDNSReconciler) reconcileDelete(ctx context.Context, dns *cfgatev1alpha1.CloudflareDNS) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 	logger.Info("handling DNS deletion",
 		"name", dns.Name,
 	)
@@ -817,8 +840,8 @@ func (r *CloudflareDNSReconciler) updateStatus(ctx context.Context, dns *cfgatev
 	return nil
 }
 
-// dnsStatusEqual compares two CloudflareDNS statuses for equality.
-// Ignores LastSyncTime as it changes on every reconciliation.
+// dnsStatusEqual compares two CloudflareDNS statuses for equality, ignoring
+// LastSyncTime which changes on every reconciliation to avoid spurious updates.
 func dnsStatusEqual(a, b *cfgatev1alpha1.CloudflareDNSStatus) bool {
 	// Compare generation
 	if a.ObservedGeneration != b.ObservedGeneration {
@@ -951,7 +974,7 @@ func (r *CloudflareDNSReconciler) createClientFromSecret(secret *corev1.Secret, 
 // getCloudflareClientWithFallback tries tunnel credentials, then fallback credentials.
 // Used during deletion when the tunnel or its secret may have been deleted.
 func (r *CloudflareDNSReconciler) getCloudflareClientWithFallback(ctx context.Context, dns *cfgatev1alpha1.CloudflareDNS) (cloudflare.Client, error) {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
 	// Try tunnel credentials first (if tunnelRef is set)
 	if dns.Spec.TunnelRef != nil {
@@ -1010,7 +1033,7 @@ func (r *CloudflareDNSReconciler) getCloudflareClientWithFallback(ctx context.Co
 
 // cleanupRecordsWithFallback deletes managed DNS records using fallback credentials if needed.
 func (r *CloudflareDNSReconciler) cleanupRecordsWithFallback(ctx context.Context, dns *cfgatev1alpha1.CloudflareDNS) error {
-	logger := log.FromContext(ctx).WithName("cloudflaredns")
+	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
 	// Get Cloudflare client (with fallback)
 	cfClient, err := r.getCloudflareClientWithFallback(ctx, dns)

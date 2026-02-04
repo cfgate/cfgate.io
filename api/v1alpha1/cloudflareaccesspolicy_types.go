@@ -5,8 +5,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PolicyTargetReference identifies a target for policy attachment.
-// Based on Gateway API LocalPolicyTargetReferenceWithSectionName.
+// PolicyTargetReference identifies a Gateway API resource for Access policy attachment.
+//
+// PolicyTargetReference follows the Gateway API LocalPolicyTargetReferenceWithSectionName
+// pattern for policy attachment. It targets Gateway API resources (Gateway, HTTPRoute,
+// GRPCRoute, TCPRoute, UDPRoute) and extracts hostnames from those resources to create
+// corresponding Cloudflare Access applications.
+//
+// Cross-namespace references require a ReferenceGrant in the target namespace that permits
+// CloudflareAccessPolicy resources from the policy's namespace.
+//
 // +kubebuilder:validation:XValidation:rule="self.group == 'gateway.networking.k8s.io'",message="group must be gateway.networking.k8s.io"
 // +kubebuilder:validation:XValidation:rule="self.kind in ['Gateway', 'HTTPRoute', 'GRPCRoute', 'TCPRoute', 'UDPRoute']",message="kind must be Gateway, HTTPRoute, GRPCRoute, TCPRoute, or UDPRoute"
 type PolicyTargetReference struct {
@@ -33,7 +41,11 @@ type PolicyTargetReference struct {
 	SectionName *string `json:"sectionName,omitempty"`
 }
 
-// CloudflareSecretRef references Cloudflare credentials.
+// CloudflareSecretRef references Cloudflare credentials for Access API operations.
+//
+// CloudflareSecretRef identifies the Secret containing Cloudflare API credentials.
+// When omitted, the controller attempts to inherit credentials from the associated
+// CloudflareTunnel (via the target Gateway's tunnel binding).
 type CloudflareSecretRef struct {
 	// Name of the secret containing credentials.
 	// +kubebuilder:validation:MinLength=1
@@ -52,7 +64,11 @@ type CloudflareSecretRef struct {
 	AccountName string `json:"accountName,omitempty"`
 }
 
-// AccessApplication defines Cloudflare Access Application settings.
+// AccessApplication defines Cloudflare Access Application configuration.
+//
+// AccessApplication configures the Cloudflare Access Application that protects the target
+// hostnames. The application appears in the Cloudflare dashboard and controls session
+// management, cookie settings, and denial behavior.
 type AccessApplication struct {
 	// Name is the display name in Cloudflare dashboard.
 	// Defaults to CR name if omitted.
@@ -114,7 +130,12 @@ type AccessApplication struct {
 	CustomDenyURL string `json:"customDenyUrl,omitempty"`
 }
 
-// AccessPolicyRule defines an access allow/deny rule.
+// AccessPolicyRule defines an access allow, deny, bypass, or non_identity rule.
+//
+// AccessPolicyRule specifies who can access the protected application. Rules are evaluated
+// in precedence order (lower precedence = higher priority). Each rule contains Include
+// (ANY must match), Exclude (if ANY match, rule does not apply), and Require (ALL must match)
+// conditions.
 type AccessPolicyRule struct {
 	// Name is a human-readable identifier.
 	// +kubebuilder:validation:MinLength=1
@@ -171,9 +192,18 @@ type AccessPolicyRule struct {
 	ApprovalGroups []ApprovalGroup `json:"approvalGroups,omitempty"`
 }
 
-// AccessRule defines identity matching criteria.
-// SDK types: IPRule, IPListRule, CountryRule, EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule,
-// EmailRule, DomainRule, EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
+// AccessRule defines identity matching criteria for Access policies.
+//
+// AccessRule specifies conditions that identify users or services. Rules are organized
+// into implementation tiers based on IdP requirements:
+//   - P0 (no IdP): IP, IPList, Country, Everyone, ServiceToken, AnyValidServiceToken
+//   - P1 (basic IdP): Email, EmailList, EmailDomain, OIDCClaim
+//   - P2 (Google Workspace): GSuiteGroup
+//   - P3 (deferred to v0.2.0): Certificate, CommonName, Group, GitHub, Azure, Okta, SAML, etc.
+//
+// SDK types map directly to cloudflare-go v6.6.0: IPRule, IPListRule, CountryRule,
+// EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule, EmailRule, DomainRule,
+// EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
 //
 // +kubebuilder:validation:XValidation:rule="[has(self.ip), has(self.ipList), has(self.country), has(self.everyone), has(self.serviceToken), has(self.anyValidServiceToken), has(self.email), has(self.emailList), has(self.emailDomain), has(self.oidcClaim), has(self.gsuiteGroup)].exists(x, x)",message="at least one rule type must be specified"
 type AccessRule struct {
@@ -261,12 +291,10 @@ type AccessRule struct {
 	// - LoginMethod (AccessLoginMethodRule) - Login method
 }
 
-// ============================================================
-// P0 Rule Types (No IdP Required)
-// ============================================================
-
-// AccessIPRule matches source IP CIDR ranges.
-// Maps to SDK: IPRule
+// AccessIPRule matches source IP CIDR ranges (P0 - no IdP required).
+//
+// AccessIPRule is used to allow or deny access based on the client's IP address.
+// Both IPv4 and IPv6 CIDR notation are supported. Maps to cloudflare-go IPRule.
 type AccessIPRule struct {
 	// Ranges are CIDR blocks (IPv4 or IPv6).
 	// +kubebuilder:validation:MinItems=1
@@ -274,8 +302,12 @@ type AccessIPRule struct {
 	Ranges []string `json:"ranges"`
 }
 
-// AccessIPListRule references a Cloudflare IP List.
-// Maps to SDK: IPListRule
+// AccessIPListRule references a Cloudflare IP List (P0 - no IdP required).
+//
+// AccessIPListRule allows referencing a managed IP list in Cloudflare by ID or name.
+// Using lists enables centralized IP management across multiple Access policies.
+// Maps to cloudflare-go IPListRule.
+//
 // +kubebuilder:validation:XValidation:rule="has(self.id) || has(self.name)",message="either id or name must be specified"
 type AccessIPListRule struct {
 	// ID of the IP list in Cloudflare.
@@ -289,8 +321,11 @@ type AccessIPListRule struct {
 	Name string `json:"name,omitempty"`
 }
 
-// AccessCountryRule matches source country codes.
-// Maps to SDK: CountryRule
+// AccessCountryRule matches source country codes (P0 - no IdP required).
+//
+// AccessCountryRule allows or denies access based on the client's geographic location.
+// Country codes must be ISO 3166-1 alpha-2 format (e.g., "US", "GB", "DE").
+// Maps to cloudflare-go CountryRule.
 type AccessCountryRule struct {
 	// Codes are ISO 3166-1 alpha-2 country codes.
 	// +kubebuilder:validation:MinItems=1
@@ -298,8 +333,11 @@ type AccessCountryRule struct {
 	Codes []string `json:"codes"`
 }
 
-// AccessServiceTokenRule matches a specific service token.
-// Maps to SDK: ServiceTokenRule
+// AccessServiceTokenRule matches a specific service token by ID (P0 - no IdP required).
+//
+// AccessServiceTokenRule enables machine-to-machine authentication using a specific
+// Cloudflare service token. The TokenID is the Cloudflare-assigned identifier for
+// the service token. Maps to cloudflare-go ServiceTokenRule.
 type AccessServiceTokenRule struct {
 	// TokenID is the Cloudflare service token ID.
 	// +kubebuilder:validation:MinLength=1
@@ -307,12 +345,10 @@ type AccessServiceTokenRule struct {
 	TokenID string `json:"tokenId"`
 }
 
-// ============================================================
-// P1 Rule Types (Basic IdP Required)
-// ============================================================
-
-// AccessEmailRule matches specific email addresses.
-// Maps to SDK: EmailRule
+// AccessEmailRule matches specific email addresses (P1 - basic IdP required).
+//
+// AccessEmailRule allows access to users with specific email addresses authenticated
+// through a configured identity provider. Maps to cloudflare-go EmailRule.
 type AccessEmailRule struct {
 	// Addresses to match.
 	// +kubebuilder:validation:MinItems=1
@@ -320,8 +356,12 @@ type AccessEmailRule struct {
 	Addresses []string `json:"addresses"`
 }
 
-// AccessEmailListRule references a Cloudflare Access email list.
-// Maps to SDK: EmailListRule
+// AccessEmailListRule references a Cloudflare Access email list (P1 - basic IdP required).
+//
+// AccessEmailListRule references a managed list of email addresses in Cloudflare.
+// Using lists enables centralized email management across multiple Access policies.
+// Maps to cloudflare-go EmailListRule.
+//
 // +kubebuilder:validation:XValidation:rule="has(self.id) || has(self.name)",message="either id or name must be specified"
 type AccessEmailListRule struct {
 	// ID of the Access list in Cloudflare.
@@ -335,8 +375,10 @@ type AccessEmailListRule struct {
 	Name string `json:"name,omitempty"`
 }
 
-// AccessEmailDomainRule matches email domain suffix.
-// Maps to SDK: DomainRule
+// AccessEmailDomainRule matches email domain suffix (P1 - basic IdP required).
+//
+// AccessEmailDomainRule allows access to any user whose email ends with the specified
+// domain. Useful for allowing entire organizations or teams. Maps to cloudflare-go DomainRule.
 type AccessEmailDomainRule struct {
 	// Domain suffix (e.g., "example.com").
 	// +kubebuilder:validation:MinLength=1
@@ -344,8 +386,11 @@ type AccessEmailDomainRule struct {
 	Domain string `json:"domain"`
 }
 
-// AccessOIDCClaimRule matches OIDC token claims.
-// Maps to SDK: AccessOIDCClaimRule
+// AccessOIDCClaimRule matches OIDC token claims (P1 - basic IdP required).
+//
+// AccessOIDCClaimRule allows access based on specific claims in the OIDC token.
+// Requires specifying the identity provider ID and the claim name/value to match.
+// Maps to cloudflare-go AccessOIDCClaimRule.
 type AccessOIDCClaimRule struct {
 	// IdentityProviderID in Cloudflare.
 	// +kubebuilder:validation:MinLength=1
@@ -363,12 +408,11 @@ type AccessOIDCClaimRule struct {
 	ClaimValue string `json:"claimValue"`
 }
 
-// ============================================================
-// P2 Rule Types (Google Workspace Groups)
-// ============================================================
-
-// AccessGSuiteGroupRule matches Google Workspace groups.
-// Maps to SDK: GSuiteGroupRule
+// AccessGSuiteGroupRule matches Google Workspace groups (P2 - Google Workspace required).
+//
+// AccessGSuiteGroupRule allows access based on Google Workspace group membership.
+// Requires a Google Workspace identity provider configured in Cloudflare Access.
+// Maps to cloudflare-go GSuiteGroupRule.
 type AccessGSuiteGroupRule struct {
 	// IdentityProviderID in Cloudflare.
 	// +kubebuilder:validation:MinLength=1
@@ -381,11 +425,12 @@ type AccessGSuiteGroupRule struct {
 	Email string `json:"email"`
 }
 
-// ============================================================
-// Supporting Types
-// ============================================================
-
-// AccessGroupRef references an AccessGroup CR or Cloudflare group.
+// AccessGroupRef references a Cloudflare Access Group.
+//
+// AccessGroupRef enables referencing reusable identity rules defined as Access Groups
+// in Cloudflare. Groups can be referenced by Kubernetes CR name (future feature) or
+// by Cloudflare ID.
+//
 // +kubebuilder:validation:XValidation:rule="has(self.name) || has(self.cloudflareId)",message="either name or cloudflareId must be specified"
 type AccessGroupRef struct {
 	// Name of AccessGroup CR in same namespace.
@@ -399,7 +444,11 @@ type AccessGroupRef struct {
 	CloudflareID string `json:"cloudflareId,omitempty"`
 }
 
-// ApprovalGroup defines who can approve access requests.
+// ApprovalGroup defines who can approve access requests for approval-required policies.
+//
+// ApprovalGroup specifies approvers by email address or email domain. When a policy
+// requires approval, users matching this group can approve or deny access requests.
+//
 // +kubebuilder:validation:XValidation:rule="size(self.emails) > 0 || has(self.emailDomain)",message="at least one approver (emails or emailDomain) must be specified"
 type ApprovalGroup struct {
 	// Emails of approvers.
@@ -418,7 +467,11 @@ type ApprovalGroup struct {
 	ApprovalsNeeded int `json:"approvalsNeeded,omitempty"`
 }
 
-// ServiceTokenConfig defines machine-to-machine authentication.
+// ServiceTokenConfig defines configuration for Cloudflare Access service tokens.
+//
+// ServiceTokenConfig enables machine-to-machine authentication. The controller creates
+// the service token in Cloudflare and stores the credentials (client ID and secret) in
+// the referenced Kubernetes Secret. The secret is only visible at creation time.
 type ServiceTokenConfig struct {
 	// Name is the token display name.
 	// +kubebuilder:validation:MinLength=1
@@ -436,14 +489,21 @@ type ServiceTokenConfig struct {
 	SecretRef ServiceTokenSecretRef `json:"secretRef"`
 }
 
-// ServiceTokenSecretRef references a Kubernetes Secret for service token storage.
+// ServiceTokenSecretRef references a Kubernetes Secret for service token credential storage.
+//
+// ServiceTokenSecretRef identifies where to store the service token credentials
+// (CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET keys) after token creation.
 type ServiceTokenSecretRef struct {
 	// Name of the Secret.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 }
 
-// MTLSConfig defines certificate-based authentication.
+// MTLSConfig defines mutual TLS (mTLS) certificate-based authentication.
+//
+// MTLSConfig enables certificate-based authentication where clients must present
+// a valid certificate signed by the configured CA. This provides strong authentication
+// for service-to-service communication.
 type MTLSConfig struct {
 	// Enabled activates mTLS requirement.
 	// +kubebuilder:default=false
@@ -464,7 +524,10 @@ type MTLSConfig struct {
 	RuleName string `json:"ruleName,omitempty"`
 }
 
-// CASecretRef references a CA certificate Secret.
+// CASecretRef references a Kubernetes Secret containing CA certificate(s) for mTLS validation.
+//
+// CASecretRef identifies the Secret containing the CA certificate chain used to validate
+// client certificates. The certificate must be in PEM format.
 type CASecretRef struct {
 	// Name of the Secret.
 	// +kubebuilder:validation:MinLength=1
@@ -475,7 +538,12 @@ type CASecretRef struct {
 	Key string `json:"key,omitempty"`
 }
 
-// CloudflareAccessPolicySpec defines the desired state of CloudflareAccessPolicy.
+// CloudflareAccessPolicySpec defines the desired state of a CloudflareAccessPolicy resource.
+//
+// CloudflareAccessPolicySpec configures Cloudflare Access protection for Gateway API resources.
+// It specifies which resources to protect (via targetRef/targetRefs), the Access Application
+// settings, and the access policies that control who can access the protected hostnames.
+//
 // +kubebuilder:validation:XValidation:rule="has(self.targetRef) || has(self.targetRefs)",message="either targetRef or targetRefs must be specified"
 // +kubebuilder:validation:XValidation:rule="!(has(self.targetRef) && has(self.targetRefs))",message="targetRef and targetRefs are mutually exclusive"
 type CloudflareAccessPolicySpec struct {
@@ -515,8 +583,11 @@ type CloudflareAccessPolicySpec struct {
 	MTLS *MTLSConfig `json:"mtls,omitempty"`
 }
 
-// PolicyAncestorStatus describes attachment status per target.
-// Follows Gateway API PolicyAncestorStatus pattern.
+// PolicyAncestorStatus describes the policy attachment status for a specific target.
+//
+// PolicyAncestorStatus follows the Gateway API PolicyAncestorStatus pattern to report
+// per-target attachment status. Each target reference in the spec has a corresponding
+// ancestor status entry showing whether the policy was successfully attached.
 type PolicyAncestorStatus struct {
 	// AncestorRef identifies the target.
 	AncestorRef PolicyTargetReference `json:"ancestorRef"`
@@ -528,7 +599,10 @@ type PolicyAncestorStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
-// CloudflareAccessPolicyStatus defines the observed state of CloudflareAccessPolicy.
+// CloudflareAccessPolicyStatus defines the observed state of a CloudflareAccessPolicy resource.
+//
+// CloudflareAccessPolicyStatus captures the Cloudflare-assigned identifiers for the
+// Access Application and policies, service token mappings, and per-target attachment status.
 type CloudflareAccessPolicyStatus struct {
 	// ApplicationID is the Cloudflare Access Application ID.
 	ApplicationID string `json:"applicationId,omitempty"`
@@ -560,6 +634,29 @@ type CloudflareAccessPolicyStatus struct {
 	Ancestors []PolicyAncestorStatus `json:"ancestors,omitempty"`
 }
 
+// CloudflareAccessPolicy is the Schema for the cloudflareaccesspolicies API.
+//
+// CloudflareAccessPolicy manages Cloudflare Access Applications and Policies for zero-trust
+// access control. It attaches to Gateway API resources (Gateway, HTTPRoute, GRPCRoute,
+// TCPRoute, UDPRoute) using the targetRefs pattern and creates corresponding Access
+// Applications in Cloudflare.
+//
+// Access rules are organized into implementation tiers based on IdP requirements:
+//   - P0: IP, IPList, Country, Everyone, ServiceToken, AnyValidServiceToken (no IdP)
+//   - P1: Email, EmailList, EmailDomain, OIDCClaim (basic IdP required)
+//   - P2: GSuiteGroup (Google Workspace required)
+//   - P3: deferred to v0.2.0 (Certificate, CommonName, Group, GitHub, Azure, Okta, SAML, etc.)
+//
+// Status conditions:
+//   - Ready: policy is fully applied to all targets
+//   - CredentialsValid: Cloudflare credentials have been validated
+//   - TargetsResolved: all targetRefs have been found and validated
+//   - ReferenceGrantValid: cross-namespace references are authorized
+//   - ApplicationCreated: Access Application exists in Cloudflare
+//   - PoliciesAttached: Access policies are attached to the application
+//   - ServiceTokensReady: all service tokens have been created
+//   - MTLSConfigured: mTLS rule is configured (if enabled)
+//
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=cfap;cfaccess
@@ -567,9 +664,6 @@ type CloudflareAccessPolicyStatus struct {
 // +kubebuilder:printcolumn:name="Application",type="string",JSONPath=".status.applicationId"
 // +kubebuilder:printcolumn:name="Targets",type="integer",JSONPath=".status.attachedTargets"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-
-// CloudflareAccessPolicy is the Schema for the cloudflareaccespolicies API.
-// It manages Cloudflare Access Applications and Policies for zero-trust access control.
 type CloudflareAccessPolicy struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -578,9 +672,9 @@ type CloudflareAccessPolicy struct {
 	Status CloudflareAccessPolicyStatus `json:"status,omitempty"`
 }
 
+// CloudflareAccessPolicyList contains a list of CloudflareAccessPolicy resources.
+//
 // +kubebuilder:object:root=true
-
-// CloudflareAccessPolicyList contains a list of CloudflareAccessPolicy.
 type CloudflareAccessPolicyList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

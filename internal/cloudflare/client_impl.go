@@ -1,4 +1,3 @@
-// Package cloudflare provides a wrapper around cloudflare-go for cfgate's needs.
 package cloudflare
 
 import (
@@ -494,7 +493,7 @@ func (c *clientImpl) GetAccountByName(ctx context.Context, name string) (*Accoun
 	return nil, nil
 }
 
-// tunnelFromAPI converts a Cloudflare API tunnel to our Tunnel type.
+// tunnelFromAPI converts a cloudflare-go SDK tunnel response to the domain Tunnel type.
 func tunnelFromAPI(t *zero_trust.CloudflareTunnel) *Tunnel {
 	if t == nil {
 		return nil
@@ -509,7 +508,7 @@ func tunnelFromAPI(t *zero_trust.CloudflareTunnel) *Tunnel {
 	}
 }
 
-// ingressOriginRequestToAPI converts our OriginRequestConfig to the per-ingress API format.
+// ingressOriginRequestToAPI converts OriginRequestConfig to the SDK per-ingress origin request format.
 func ingressOriginRequestToAPI(config *OriginRequestConfig) zero_trust.TunnelCloudflaredConfigurationUpdateParamsConfigIngressOriginRequest {
 	req := zero_trust.TunnelCloudflaredConfigurationUpdateParamsConfigIngressOriginRequest{}
 
@@ -545,7 +544,7 @@ func ingressOriginRequestToAPI(config *OriginRequestConfig) zero_trust.TunnelClo
 	return req
 }
 
-// globalOriginRequestToAPI converts our OriginRequestConfig to the global config API format.
+// globalOriginRequestToAPI converts OriginRequestConfig to the SDK global origin request format.
 func globalOriginRequestToAPI(config *OriginRequestConfig) zero_trust.TunnelCloudflaredConfigurationUpdateParamsConfigOriginRequest {
 	req := zero_trust.TunnelCloudflaredConfigurationUpdateParamsConfigOriginRequest{}
 
@@ -580,10 +579,9 @@ func globalOriginRequestToAPI(config *OriginRequestConfig) zero_trust.TunnelClou
 	return req
 }
 
-// generateTunnelSecret generates a base64-encoded tunnel secret.
+// generateTunnelSecret returns a placeholder tunnel secret.
+// The Cloudflare API generates the actual secret; this value satisfies the SDK requirement.
 func generateTunnelSecret() string {
-	// Generate 32 random bytes and base64 encode them
-	// Using a simple deterministic approach for now (the API generates the actual secret)
 	return "Y2ZnYXRlLWdlbmVyYXRlZC1zZWNyZXQtdG9rZW4="
 }
 
@@ -1273,10 +1271,10 @@ func (c *clientImpl) UpdateMTLSCertificateSettings(ctx context.Context, accountI
 }
 
 // =============================================================================
-// Conversion helpers
+// SDK response conversion helpers
 // =============================================================================
 
-// applicationFromNewResponse converts an API response to our AccessApplication type.
+// applicationFromNewResponse converts AccessApplicationNewResponse to AccessApplication.
 func applicationFromNewResponse(resp *zero_trust.AccessApplicationNewResponse) *AccessApplication {
 	if resp == nil {
 		return nil
@@ -1314,7 +1312,7 @@ func applicationFromNewResponse(resp *zero_trust.AccessApplicationNewResponse) *
 	return app
 }
 
-// applicationFromGetResponse converts a Get response to our AccessApplication type.
+// applicationFromGetResponse converts AccessApplicationGetResponse to AccessApplication.
 func applicationFromGetResponse(resp *zero_trust.AccessApplicationGetResponse) *AccessApplication {
 	if resp == nil {
 		return nil
@@ -1350,7 +1348,7 @@ func applicationFromGetResponse(resp *zero_trust.AccessApplicationGetResponse) *
 	return app
 }
 
-// applicationFromUpdateResponse converts an Update response to our AccessApplication type.
+// applicationFromUpdateResponse converts AccessApplicationUpdateResponse to AccessApplication.
 func applicationFromUpdateResponse(resp *zero_trust.AccessApplicationUpdateResponse) *AccessApplication {
 	if resp == nil {
 		return nil
@@ -1386,7 +1384,7 @@ func applicationFromUpdateResponse(resp *zero_trust.AccessApplicationUpdateRespo
 	return app
 }
 
-// applicationFromListResponse converts a list response item to our AccessApplication type.
+// applicationFromListResponse converts AccessApplicationListResponse to AccessApplication.
 func applicationFromListResponse(resp *zero_trust.AccessApplicationListResponse) *AccessApplication {
 	if resp == nil {
 		return nil
@@ -1422,7 +1420,7 @@ func applicationFromListResponse(resp *zero_trust.AccessApplicationListResponse)
 	return app
 }
 
-// policyFromNewResponse converts a policy API response to our AccessPolicy type.
+// policyFromNewResponse converts AccessApplicationPolicyNewResponse to AccessPolicy.
 func policyFromNewResponse(resp *zero_trust.AccessApplicationPolicyNewResponse, name, decision string) *AccessPolicy {
 	if resp == nil {
 		return nil
@@ -1442,7 +1440,7 @@ func policyFromNewResponse(resp *zero_trust.AccessApplicationPolicyNewResponse, 
 	}
 }
 
-// policyFromGetResponse converts a Get response to our AccessPolicy type.
+// policyFromGetResponse converts AccessApplicationPolicyGetResponse to AccessPolicy.
 func policyFromGetResponse(resp *zero_trust.AccessApplicationPolicyGetResponse) *AccessPolicy {
 	if resp == nil {
 		return nil
@@ -1462,7 +1460,7 @@ func policyFromGetResponse(resp *zero_trust.AccessApplicationPolicyGetResponse) 
 	}
 }
 
-// policyFromUpdateResponse converts an Update response to our AccessPolicy type.
+// policyFromUpdateResponse converts AccessApplicationPolicyUpdateResponse to AccessPolicy.
 func policyFromUpdateResponse(resp *zero_trust.AccessApplicationPolicyUpdateResponse, name, decision string) *AccessPolicy {
 	if resp == nil {
 		return nil
@@ -1482,7 +1480,7 @@ func policyFromUpdateResponse(resp *zero_trust.AccessApplicationPolicyUpdateResp
 	}
 }
 
-// policyFromListResponse converts a list response item to our AccessPolicy type.
+// policyFromListResponse converts AccessApplicationPolicyListResponse to AccessPolicy.
 func policyFromListResponse(resp *zero_trust.AccessApplicationPolicyListResponse) *AccessPolicy {
 	if resp == nil {
 		return nil
@@ -1502,7 +1500,7 @@ func policyFromListResponse(resp *zero_trust.AccessApplicationPolicyListResponse
 	}
 }
 
-// groupFromNewResponse converts a group API response to our AccessGroup type.
+// groupFromNewResponse converts AccessGroupNewResponse to AccessGroup.
 func groupFromNewResponse(resp *zero_trust.AccessGroupNewResponse) *AccessGroup {
 	if resp == nil {
 		return nil
@@ -1515,7 +1513,7 @@ func groupFromNewResponse(resp *zero_trust.AccessGroupNewResponse) *AccessGroup 
 	}
 }
 
-// groupFromGetResponse converts a Get response to our AccessGroup type.
+// groupFromGetResponse converts AccessGroupGetResponse to AccessGroup.
 func groupFromGetResponse(resp *zero_trust.AccessGroupGetResponse) *AccessGroup {
 	if resp == nil {
 		return nil
@@ -1527,7 +1525,7 @@ func groupFromGetResponse(resp *zero_trust.AccessGroupGetResponse) *AccessGroup 
 	}
 }
 
-// groupFromUpdateResponse converts an Update response to our AccessGroup type.
+// groupFromUpdateResponse converts AccessGroupUpdateResponse to AccessGroup.
 func groupFromUpdateResponse(resp *zero_trust.AccessGroupUpdateResponse) *AccessGroup {
 	if resp == nil {
 		return nil
@@ -1539,7 +1537,7 @@ func groupFromUpdateResponse(resp *zero_trust.AccessGroupUpdateResponse) *Access
 	}
 }
 
-// groupFromListResponse converts a list response item to our AccessGroup type.
+// groupFromListResponse converts AccessGroupListResponse to AccessGroup.
 func groupFromListResponse(resp *zero_trust.AccessGroupListResponse) *AccessGroup {
 	if resp == nil {
 		return nil
@@ -1551,7 +1549,7 @@ func groupFromListResponse(resp *zero_trust.AccessGroupListResponse) *AccessGrou
 	}
 }
 
-// accessRulesToAPI converts our AccessRuleParam slice to API format.
+// accessRulesToAPI converts a slice of AccessRuleParam to SDK AccessRuleUnionParam.
 func accessRulesToAPI(rules []AccessRuleParam) []zero_trust.AccessRuleUnionParam {
 	if len(rules) == 0 {
 		return nil
@@ -1567,7 +1565,8 @@ func accessRulesToAPI(rules []AccessRuleParam) []zero_trust.AccessRuleUnionParam
 	return result
 }
 
-// accessRuleToAPI converts a single AccessRuleParam to API format.
+// accessRuleToAPI converts a single AccessRuleParam to SDK AccessRuleUnionParam.
+// Returns nil if no rule type is set. Only one field should be set per rule.
 func accessRuleToAPI(rule *AccessRuleParam) zero_trust.AccessRuleUnionParam {
 	if rule == nil {
 		return nil

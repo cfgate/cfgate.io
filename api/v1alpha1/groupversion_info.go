@@ -9,12 +9,17 @@ import (
 )
 
 var (
-	// GroupVersion is group version used to register these objects.
+	// GroupVersion is the API group and version for cfgate resources.
+	// All cfgate CRDs (CloudflareTunnel, CloudflareDNS, CloudflareAccessPolicy) are registered
+	// under this GroupVersion.
 	GroupVersion = schema.GroupVersion{Group: "cfgate.io", Version: "v1alpha1"}
 
-	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
+	// SchemeBuilder is used to register cfgate types with a Kubernetes scheme.
+	// Call SchemeBuilder.AddToScheme to add cfgate types to your scheme.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
 
-	// AddToScheme adds the types in this group-version to the given scheme.
+	// AddToScheme adds the cfgate v1alpha1 types to a Kubernetes scheme.
+	// This function is typically called during controller initialization to register
+	// the CloudflareTunnel, CloudflareDNS, and CloudflareAccessPolicy types.
 	AddToScheme = SchemeBuilder.AddToScheme
 )

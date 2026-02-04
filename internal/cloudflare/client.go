@@ -1,5 +1,3 @@
-// Package cloudflare provides a wrapper around cloudflare-go for cfgate's needs.
-// It abstracts Cloudflare API operations for tunnels, DNS, and zones.
 package cloudflare
 
 import (
@@ -7,8 +5,19 @@ import (
 	"fmt"
 )
 
-// Client wraps cloudflare-go for cfgate's needs.
-// It provides a high-level interface for tunnel and DNS operations.
+// Client defines the low-level Cloudflare API operations.
+//
+// Client wraps cloudflare-go v6 SDK and handles error normalization, 404 patterns,
+// and SDK quirks. Controllers should use the high-level services (TunnelService,
+// DNSService, AccessService) rather than Client directly.
+//
+// Create a new client with NewClient:
+//
+//	client, err := cloudflare.NewClient(apiToken)
+//
+// The client implements idempotent 404 handling: methods that retrieve resources
+// (GetTunnel, GetZoneByName, etc.) return nil, nil when the resource doesn't exist
+// rather than an error.
 type Client interface {
 	// Tunnel operations
 
