@@ -69,6 +69,15 @@ type Client interface {
 	// Returns an error if the token is invalid or missing permissions.
 	ValidateToken(ctx context.Context, accountID string) error
 
+	// Account operations
+
+	// ListAccounts lists all accounts accessible with the current credentials.
+	ListAccounts(ctx context.Context) ([]Account, error)
+
+	// GetAccountByName retrieves an account by name.
+	// Returns nil if the account does not exist.
+	GetAccountByName(ctx context.Context, name string) (*Account, error)
+
 	// Access Application operations
 
 	// CreateAccessApplication creates a new Access application.
@@ -355,6 +364,15 @@ type Zone struct {
 
 	// AccountID is the account ID owning the zone.
 	AccountID string
+}
+
+// Account represents a Cloudflare account.
+type Account struct {
+	// ID is the account ID.
+	ID string
+
+	// Name is the account name.
+	Name string
 }
 
 // APIError represents a Cloudflare API error.

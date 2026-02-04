@@ -155,11 +155,17 @@ spec:
                     cloudflareId:
                       description: CloudflareID of group in Cloudflare (bypasses CR
                         lookup).
+                      maxLength: 36
                       type: string
                     name:
                       description: Name of AccessGroup CR in same namespace.
+                      maxLength: 253
                       type: string
                   type: object
+                  x-kubernetes-validations:
+                  - message: either name or cloudflareId must be specified
+                    rule: has(self.name) || has(self.cloudflareId)
+                maxItems: 50
                 type: array
               mtls:
                 description: MTLS configures certificate-based authentication.
@@ -168,6 +174,7 @@ spec:
                     description: AssociatedHostnames limits mTLS to specific hostnames.
                     items:
                       type: string
+                    maxItems: 25
                     type: array
                   enabled:
                     default: false
@@ -215,13 +222,20 @@ spec:
                           emailDomain:
                             description: EmailDomain allows any user from domain to
                               approve.
+                            maxLength: 255
                             type: string
                           emails:
                             description: Emails of approvers.
                             items:
                               type: string
+                            maxItems: 50
                             type: array
                         type: object
+                        x-kubernetes-validations:
+                        - message: at least one approver (emails or emailDomain) must
+                            be specified
+                          rule: size(self.emails) > 0 || has(self.emailDomain)
+                      maxItems: 10
                       type: array
                     approvalRequired:
                       default: false
@@ -240,378 +254,362 @@ spec:
                     exclude:
                       description: Exclude rules (if ANY match, rule does not apply).
                       items:
-                        description: AccessRule defines identity matching criteria.
+                        description: |-
+                          AccessRule defines identity matching criteria.
+                          SDK types: IPRule, IPListRule, CountryRule, EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule,
+                          EmailRule, DomainRule, EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
                         properties:
-                          azure:
-                            description: Azure matches Azure AD groups.
-                            properties:
-                              groups:
-                                description: Groups are Azure AD group IDs.
-                                items:
-                                  type: string
-                                type: array
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
-                                minLength: 1
-                                type: string
-                            required:
-                            - identityProviderId
-                            type: object
-                          certificate:
-                            description: Certificate requires valid mTLS certificate.
+                          anyValidServiceToken:
+                            description: |-
+                              AnyValidServiceToken matches any valid service token.
+                              SDK: AnyValidServiceTokenRule
                             type: boolean
-                          commonName:
-                            description: CommonName matches certificate common name.
-                            properties:
-                              value:
-                                description: Value is the expected common name.
-                                minLength: 1
-                                type: string
-                            required:
-                            - value
-                            type: object
                           country:
-                            description: Country matches source country codes (ISO
-                              3166-1 alpha-2).
+                            description: |-
+                              Country matches source country codes (ISO 3166-1 alpha-2).
+                              SDK: CountryRule
                             properties:
                               codes:
                                 description: Codes are ISO 3166-1 alpha-2 country
                                   codes.
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - codes
                             type: object
                           email:
-                            description: Email matches specific email addresses.
+                            description: |-
+                              Email matches specific email addresses.
+                              SDK: EmailRule
                             properties:
                               addresses:
                                 description: Addresses to match.
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - addresses
                             type: object
                           emailDomain:
-                            description: EmailDomain matches email domain suffix.
+                            description: |-
+                              EmailDomain matches email domain suffix.
+                              SDK: DomainRule
                             properties:
                               domain:
                                 description: Domain suffix (e.g., "example.com").
+                                maxLength: 255
                                 minLength: 1
                                 type: string
                             required:
                             - domain
                             type: object
-                          emailListRef:
-                            description: EmailListRef references a Cloudflare Access
-                              list.
+                          emailList:
+                            description: |-
+                              EmailList references a Cloudflare Access email list.
+                              SDK: EmailListRule
                             properties:
                               id:
                                 description: ID of the Access list in Cloudflare.
+                                maxLength: 36
                                 type: string
                               name:
                                 description: Name of the Access list (looked up via
                                   API).
+                                maxLength: 255
                                 type: string
                             type: object
+                            x-kubernetes-validations:
+                            - message: either id or name must be specified
+                              rule: has(self.id) || has(self.name)
                           everyone:
-                            description: Everyone matches all users (use with caution).
+                            description: |-
+                              Everyone matches all users (use with caution).
+                              SDK: EveryoneRule
                             type: boolean
-                          github:
-                            description: GitHub matches GitHub organization membership.
+                          gsuiteGroup:
+                            description: |-
+                              GSuiteGroup matches Google Workspace groups.
+                              SDK: GSuiteGroupRule
                             properties:
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
+                              email:
+                                description: Email is the Google Workspace group email.
+                                maxLength: 320
                                 minLength: 1
                                 type: string
-                              organization:
-                                description: Organization name.
-                                type: string
-                              teams:
-                                description: Teams within organization.
-                                items:
-                                  type: string
-                                type: array
-                            required:
-                            - identityProviderId
-                            type: object
-                          groupRef:
-                            description: GroupRef references an AccessGroup CR.
-                            properties:
-                              cloudflareId:
-                                description: CloudflareID of group in Cloudflare (bypasses
-                                  CR lookup).
-                                type: string
-                              name:
-                                description: Name of AccessGroup CR in same namespace.
-                                type: string
-                            type: object
-                          gsuite:
-                            description: GSuite matches Google Workspace groups.
-                            properties:
-                              groups:
-                                description: Groups to match.
-                                items:
-                                  type: string
-                                type: array
                               identityProviderId:
                                 description: IdentityProviderID in Cloudflare.
+                                maxLength: 36
                                 minLength: 1
                                 type: string
                             required:
+                            - email
                             - identityProviderId
                             type: object
-                          ipRange:
-                            description: IPRange matches source IP CIDR ranges.
+                          ip:
+                            description: |-
+                              IP matches source IP CIDR ranges.
+                              SDK: IPRule
                             properties:
                               ranges:
-                                description: Ranges are CIDR blocks.
+                                description: Ranges are CIDR blocks (IPv4 or IPv6).
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - ranges
                             type: object
-                          okta:
-                            description: Okta matches Okta groups.
+                          ipList:
+                            description: |-
+                              IPList references a Cloudflare IP List.
+                              SDK: IPListRule
                             properties:
-                              groups:
-                                description: Groups to match.
-                                items:
-                                  type: string
-                                type: array
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
-                                minLength: 1
+                              id:
+                                description: ID of the IP list in Cloudflare.
+                                maxLength: 36
                                 type: string
-                            required:
-                            - identityProviderId
+                              name:
+                                description: Name of the IP list (looked up via API).
+                                maxLength: 255
+                                type: string
                             type: object
-                          saml:
-                            description: SAML matches SAML assertion attributes.
+                            x-kubernetes-validations:
+                            - message: either id or name must be specified
+                              rule: has(self.id) || has(self.name)
+                          oidcClaim:
+                            description: |-
+                              OIDCClaim matches OIDC token claims.
+                              SDK: AccessOIDCClaimRule
                             properties:
-                              attributeName:
-                                description: AttributeName to match.
+                              claimName:
+                                description: ClaimName is the OIDC claim to match.
+                                maxLength: 255
                                 minLength: 1
                                 type: string
-                              attributeValue:
-                                description: AttributeValue expected.
+                              claimValue:
+                                description: ClaimValue is the expected value.
+                                maxLength: 255
                                 minLength: 1
                                 type: string
                               identityProviderId:
                                 description: IdentityProviderID in Cloudflare.
+                                maxLength: 36
                                 minLength: 1
                                 type: string
                             required:
-                            - attributeName
-                            - attributeValue
+                            - claimName
+                            - claimValue
                             - identityProviderId
                             type: object
                           serviceToken:
-                            description: ServiceToken requires valid service token.
-                            type: boolean
+                            description: |-
+                              ServiceToken matches a specific service token by ID.
+                              SDK: ServiceTokenRule
+                            properties:
+                              tokenId:
+                                description: TokenID is the Cloudflare service token
+                                  ID.
+                                maxLength: 36
+                                minLength: 1
+                                type: string
+                            required:
+                            - tokenId
+                            type: object
                         type: object
                         x-kubernetes-validations:
                         - message: at least one rule type must be specified
-                          rule: '[has(self.email), has(self.emailDomain), has(self.emailListRef),
-                            has(self.ipRange), has(self.country), has(self.everyone),
-                            has(self.certificate), has(self.commonName), has(self.serviceToken),
-                            has(self.groupRef), has(self.gsuite), has(self.github),
-                            has(self.azure), has(self.okta), has(self.saml)].exists(x,
+                          rule: '[has(self.ip), has(self.ipList), has(self.country),
+                            has(self.everyone), has(self.serviceToken), has(self.anyValidServiceToken),
+                            has(self.email), has(self.emailList), has(self.emailDomain),
+                            has(self.oidcClaim), has(self.gsuiteGroup)].exists(x,
                             x)'
+                      maxItems: 25
                       type: array
                     include:
                       description: Include rules (ANY must match for rule to apply).
                       items:
-                        description: AccessRule defines identity matching criteria.
+                        description: |-
+                          AccessRule defines identity matching criteria.
+                          SDK types: IPRule, IPListRule, CountryRule, EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule,
+                          EmailRule, DomainRule, EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
                         properties:
-                          azure:
-                            description: Azure matches Azure AD groups.
-                            properties:
-                              groups:
-                                description: Groups are Azure AD group IDs.
-                                items:
-                                  type: string
-                                type: array
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
-                                minLength: 1
-                                type: string
-                            required:
-                            - identityProviderId
-                            type: object
-                          certificate:
-                            description: Certificate requires valid mTLS certificate.
+                          anyValidServiceToken:
+                            description: |-
+                              AnyValidServiceToken matches any valid service token.
+                              SDK: AnyValidServiceTokenRule
                             type: boolean
-                          commonName:
-                            description: CommonName matches certificate common name.
-                            properties:
-                              value:
-                                description: Value is the expected common name.
-                                minLength: 1
-                                type: string
-                            required:
-                            - value
-                            type: object
                           country:
-                            description: Country matches source country codes (ISO
-                              3166-1 alpha-2).
+                            description: |-
+                              Country matches source country codes (ISO 3166-1 alpha-2).
+                              SDK: CountryRule
                             properties:
                               codes:
                                 description: Codes are ISO 3166-1 alpha-2 country
                                   codes.
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - codes
                             type: object
                           email:
-                            description: Email matches specific email addresses.
+                            description: |-
+                              Email matches specific email addresses.
+                              SDK: EmailRule
                             properties:
                               addresses:
                                 description: Addresses to match.
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - addresses
                             type: object
                           emailDomain:
-                            description: EmailDomain matches email domain suffix.
+                            description: |-
+                              EmailDomain matches email domain suffix.
+                              SDK: DomainRule
                             properties:
                               domain:
                                 description: Domain suffix (e.g., "example.com").
+                                maxLength: 255
                                 minLength: 1
                                 type: string
                             required:
                             - domain
                             type: object
-                          emailListRef:
-                            description: EmailListRef references a Cloudflare Access
-                              list.
+                          emailList:
+                            description: |-
+                              EmailList references a Cloudflare Access email list.
+                              SDK: EmailListRule
                             properties:
                               id:
                                 description: ID of the Access list in Cloudflare.
+                                maxLength: 36
                                 type: string
                               name:
                                 description: Name of the Access list (looked up via
                                   API).
+                                maxLength: 255
                                 type: string
                             type: object
+                            x-kubernetes-validations:
+                            - message: either id or name must be specified
+                              rule: has(self.id) || has(self.name)
                           everyone:
-                            description: Everyone matches all users (use with caution).
+                            description: |-
+                              Everyone matches all users (use with caution).
+                              SDK: EveryoneRule
                             type: boolean
-                          github:
-                            description: GitHub matches GitHub organization membership.
+                          gsuiteGroup:
+                            description: |-
+                              GSuiteGroup matches Google Workspace groups.
+                              SDK: GSuiteGroupRule
                             properties:
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
+                              email:
+                                description: Email is the Google Workspace group email.
+                                maxLength: 320
                                 minLength: 1
                                 type: string
-                              organization:
-                                description: Organization name.
-                                type: string
-                              teams:
-                                description: Teams within organization.
-                                items:
-                                  type: string
-                                type: array
-                            required:
-                            - identityProviderId
-                            type: object
-                          groupRef:
-                            description: GroupRef references an AccessGroup CR.
-                            properties:
-                              cloudflareId:
-                                description: CloudflareID of group in Cloudflare (bypasses
-                                  CR lookup).
-                                type: string
-                              name:
-                                description: Name of AccessGroup CR in same namespace.
-                                type: string
-                            type: object
-                          gsuite:
-                            description: GSuite matches Google Workspace groups.
-                            properties:
-                              groups:
-                                description: Groups to match.
-                                items:
-                                  type: string
-                                type: array
                               identityProviderId:
                                 description: IdentityProviderID in Cloudflare.
+                                maxLength: 36
                                 minLength: 1
                                 type: string
                             required:
+                            - email
                             - identityProviderId
                             type: object
-                          ipRange:
-                            description: IPRange matches source IP CIDR ranges.
+                          ip:
+                            description: |-
+                              IP matches source IP CIDR ranges.
+                              SDK: IPRule
                             properties:
                               ranges:
-                                description: Ranges are CIDR blocks.
+                                description: Ranges are CIDR blocks (IPv4 or IPv6).
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - ranges
                             type: object
-                          okta:
-                            description: Okta matches Okta groups.
+                          ipList:
+                            description: |-
+                              IPList references a Cloudflare IP List.
+                              SDK: IPListRule
                             properties:
-                              groups:
-                                description: Groups to match.
-                                items:
-                                  type: string
-                                type: array
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
-                                minLength: 1
+                              id:
+                                description: ID of the IP list in Cloudflare.
+                                maxLength: 36
                                 type: string
-                            required:
-                            - identityProviderId
+                              name:
+                                description: Name of the IP list (looked up via API).
+                                maxLength: 255
+                                type: string
                             type: object
-                          saml:
-                            description: SAML matches SAML assertion attributes.
+                            x-kubernetes-validations:
+                            - message: either id or name must be specified
+                              rule: has(self.id) || has(self.name)
+                          oidcClaim:
+                            description: |-
+                              OIDCClaim matches OIDC token claims.
+                              SDK: AccessOIDCClaimRule
                             properties:
-                              attributeName:
-                                description: AttributeName to match.
+                              claimName:
+                                description: ClaimName is the OIDC claim to match.
+                                maxLength: 255
                                 minLength: 1
                                 type: string
-                              attributeValue:
-                                description: AttributeValue expected.
+                              claimValue:
+                                description: ClaimValue is the expected value.
+                                maxLength: 255
                                 minLength: 1
                                 type: string
                               identityProviderId:
                                 description: IdentityProviderID in Cloudflare.
+                                maxLength: 36
                                 minLength: 1
                                 type: string
                             required:
-                            - attributeName
-                            - attributeValue
+                            - claimName
+                            - claimValue
                             - identityProviderId
                             type: object
                           serviceToken:
-                            description: ServiceToken requires valid service token.
-                            type: boolean
+                            description: |-
+                              ServiceToken matches a specific service token by ID.
+                              SDK: ServiceTokenRule
+                            properties:
+                              tokenId:
+                                description: TokenID is the Cloudflare service token
+                                  ID.
+                                maxLength: 36
+                                minLength: 1
+                                type: string
+                            required:
+                            - tokenId
+                            type: object
                         type: object
                         x-kubernetes-validations:
                         - message: at least one rule type must be specified
-                          rule: '[has(self.email), has(self.emailDomain), has(self.emailListRef),
-                            has(self.ipRange), has(self.country), has(self.everyone),
-                            has(self.certificate), has(self.commonName), has(self.serviceToken),
-                            has(self.groupRef), has(self.gsuite), has(self.github),
-                            has(self.azure), has(self.okta), has(self.saml)].exists(x,
+                          rule: '[has(self.ip), has(self.ipList), has(self.country),
+                            has(self.everyone), has(self.serviceToken), has(self.anyValidServiceToken),
+                            has(self.email), has(self.emailList), has(self.emailDomain),
+                            has(self.oidcClaim), has(self.gsuiteGroup)].exists(x,
                             x)'
+                      maxItems: 25
                       type: array
                     name:
                       description: Name is a human-readable identifier.
@@ -636,190 +634,182 @@ spec:
                     require:
                       description: Require rules (ALL must match for rule to apply).
                       items:
-                        description: AccessRule defines identity matching criteria.
+                        description: |-
+                          AccessRule defines identity matching criteria.
+                          SDK types: IPRule, IPListRule, CountryRule, EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule,
+                          EmailRule, DomainRule, EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
                         properties:
-                          azure:
-                            description: Azure matches Azure AD groups.
-                            properties:
-                              groups:
-                                description: Groups are Azure AD group IDs.
-                                items:
-                                  type: string
-                                type: array
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
-                                minLength: 1
-                                type: string
-                            required:
-                            - identityProviderId
-                            type: object
-                          certificate:
-                            description: Certificate requires valid mTLS certificate.
+                          anyValidServiceToken:
+                            description: |-
+                              AnyValidServiceToken matches any valid service token.
+                              SDK: AnyValidServiceTokenRule
                             type: boolean
-                          commonName:
-                            description: CommonName matches certificate common name.
-                            properties:
-                              value:
-                                description: Value is the expected common name.
-                                minLength: 1
-                                type: string
-                            required:
-                            - value
-                            type: object
                           country:
-                            description: Country matches source country codes (ISO
-                              3166-1 alpha-2).
+                            description: |-
+                              Country matches source country codes (ISO 3166-1 alpha-2).
+                              SDK: CountryRule
                             properties:
                               codes:
                                 description: Codes are ISO 3166-1 alpha-2 country
                                   codes.
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - codes
                             type: object
                           email:
-                            description: Email matches specific email addresses.
+                            description: |-
+                              Email matches specific email addresses.
+                              SDK: EmailRule
                             properties:
                               addresses:
                                 description: Addresses to match.
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - addresses
                             type: object
                           emailDomain:
-                            description: EmailDomain matches email domain suffix.
+                            description: |-
+                              EmailDomain matches email domain suffix.
+                              SDK: DomainRule
                             properties:
                               domain:
                                 description: Domain suffix (e.g., "example.com").
+                                maxLength: 255
                                 minLength: 1
                                 type: string
                             required:
                             - domain
                             type: object
-                          emailListRef:
-                            description: EmailListRef references a Cloudflare Access
-                              list.
+                          emailList:
+                            description: |-
+                              EmailList references a Cloudflare Access email list.
+                              SDK: EmailListRule
                             properties:
                               id:
                                 description: ID of the Access list in Cloudflare.
+                                maxLength: 36
                                 type: string
                               name:
                                 description: Name of the Access list (looked up via
                                   API).
+                                maxLength: 255
                                 type: string
                             type: object
+                            x-kubernetes-validations:
+                            - message: either id or name must be specified
+                              rule: has(self.id) || has(self.name)
                           everyone:
-                            description: Everyone matches all users (use with caution).
+                            description: |-
+                              Everyone matches all users (use with caution).
+                              SDK: EveryoneRule
                             type: boolean
-                          github:
-                            description: GitHub matches GitHub organization membership.
+                          gsuiteGroup:
+                            description: |-
+                              GSuiteGroup matches Google Workspace groups.
+                              SDK: GSuiteGroupRule
                             properties:
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
+                              email:
+                                description: Email is the Google Workspace group email.
+                                maxLength: 320
                                 minLength: 1
                                 type: string
-                              organization:
-                                description: Organization name.
-                                type: string
-                              teams:
-                                description: Teams within organization.
-                                items:
-                                  type: string
-                                type: array
-                            required:
-                            - identityProviderId
-                            type: object
-                          groupRef:
-                            description: GroupRef references an AccessGroup CR.
-                            properties:
-                              cloudflareId:
-                                description: CloudflareID of group in Cloudflare (bypasses
-                                  CR lookup).
-                                type: string
-                              name:
-                                description: Name of AccessGroup CR in same namespace.
-                                type: string
-                            type: object
-                          gsuite:
-                            description: GSuite matches Google Workspace groups.
-                            properties:
-                              groups:
-                                description: Groups to match.
-                                items:
-                                  type: string
-                                type: array
                               identityProviderId:
                                 description: IdentityProviderID in Cloudflare.
+                                maxLength: 36
                                 minLength: 1
                                 type: string
                             required:
+                            - email
                             - identityProviderId
                             type: object
-                          ipRange:
-                            description: IPRange matches source IP CIDR ranges.
+                          ip:
+                            description: |-
+                              IP matches source IP CIDR ranges.
+                              SDK: IPRule
                             properties:
                               ranges:
-                                description: Ranges are CIDR blocks.
+                                description: Ranges are CIDR blocks (IPv4 or IPv6).
                                 items:
                                   type: string
+                                maxItems: 50
                                 minItems: 1
                                 type: array
                             required:
                             - ranges
                             type: object
-                          okta:
-                            description: Okta matches Okta groups.
+                          ipList:
+                            description: |-
+                              IPList references a Cloudflare IP List.
+                              SDK: IPListRule
                             properties:
-                              groups:
-                                description: Groups to match.
-                                items:
-                                  type: string
-                                type: array
-                              identityProviderId:
-                                description: IdentityProviderID in Cloudflare.
-                                minLength: 1
+                              id:
+                                description: ID of the IP list in Cloudflare.
+                                maxLength: 36
                                 type: string
-                            required:
-                            - identityProviderId
+                              name:
+                                description: Name of the IP list (looked up via API).
+                                maxLength: 255
+                                type: string
                             type: object
-                          saml:
-                            description: SAML matches SAML assertion attributes.
+                            x-kubernetes-validations:
+                            - message: either id or name must be specified
+                              rule: has(self.id) || has(self.name)
+                          oidcClaim:
+                            description: |-
+                              OIDCClaim matches OIDC token claims.
+                              SDK: AccessOIDCClaimRule
                             properties:
-                              attributeName:
-                                description: AttributeName to match.
+                              claimName:
+                                description: ClaimName is the OIDC claim to match.
+                                maxLength: 255
                                 minLength: 1
                                 type: string
-                              attributeValue:
-                                description: AttributeValue expected.
+                              claimValue:
+                                description: ClaimValue is the expected value.
+                                maxLength: 255
                                 minLength: 1
                                 type: string
                               identityProviderId:
                                 description: IdentityProviderID in Cloudflare.
+                                maxLength: 36
                                 minLength: 1
                                 type: string
                             required:
-                            - attributeName
-                            - attributeValue
+                            - claimName
+                            - claimValue
                             - identityProviderId
                             type: object
                           serviceToken:
-                            description: ServiceToken requires valid service token.
-                            type: boolean
+                            description: |-
+                              ServiceToken matches a specific service token by ID.
+                              SDK: ServiceTokenRule
+                            properties:
+                              tokenId:
+                                description: TokenID is the Cloudflare service token
+                                  ID.
+                                maxLength: 36
+                                minLength: 1
+                                type: string
+                            required:
+                            - tokenId
+                            type: object
                         type: object
                         x-kubernetes-validations:
                         - message: at least one rule type must be specified
-                          rule: '[has(self.email), has(self.emailDomain), has(self.emailListRef),
-                            has(self.ipRange), has(self.country), has(self.everyone),
-                            has(self.certificate), has(self.commonName), has(self.serviceToken),
-                            has(self.groupRef), has(self.gsuite), has(self.github),
-                            has(self.azure), has(self.okta), has(self.saml)].exists(x,
+                          rule: '[has(self.ip), has(self.ipList), has(self.country),
+                            has(self.everyone), has(self.serviceToken), has(self.anyValidServiceToken),
+                            has(self.email), has(self.emailList), has(self.emailDomain),
+                            has(self.oidcClaim), has(self.gsuiteGroup)].exists(x,
                             x)'
+                      maxItems: 25
                       type: array
                     sessionDuration:
                       description: SessionDuration overrides application session duration
@@ -837,9 +827,11 @@ spec:
                   description: ServiceTokenConfig defines machine-to-machine authentication.
                   properties:
                     duration:
-                      default: 365d
-                      description: Duration is the token validity period.
-                      pattern: ^[0-9]+(h|d|y)$
+                      default: 8760h
+                      description: |-
+                        Duration is the token validity period using Go duration format.
+                        Only hours (h) supported by Cloudflare API. Use "8760h" for 1 year.
+                      pattern: ^[0-9]+h$
                       type: string
                     name:
                       description: Name is the token display name.
@@ -860,6 +852,7 @@ spec:
                   - name
                   - secretRef
                   type: object
+                maxItems: 10
                 type: array
               targetRef:
                 description: TargetRef identifies a single target for policy attachment.
@@ -949,6 +942,7 @@ spec:
                       or UDPRoute
                     rule: self.kind in ['Gateway', 'HTTPRoute', 'GRPCRoute', 'TCPRoute',
                       'UDPRoute']
+                maxItems: 16
                 type: array
             required:
             - application

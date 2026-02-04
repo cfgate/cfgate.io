@@ -294,16 +294,17 @@ type UpdatePolicyParams struct {
 }
 
 // AccessRuleParam represents an access rule parameter.
-// This is a simplified representation - only one field should be set per rule.
+// Only one field should be set per rule.
 type AccessRuleParam struct {
-	// Email matches a specific email address.
-	Email *string
+	// ============================================================
+	// P0: No IdP required (always testable)
+	// ============================================================
 
-	// EmailDomain matches an email domain.
-	EmailDomain *string
-
-	// IP matches an IP range (CIDR notation).
+	// IPRange matches an IP range (CIDR notation).
 	IPRange *string
+
+	// IPListID matches IPs from a Cloudflare IP List.
+	IPListID *string
 
 	// Country matches a country code (ISO 3166-1 alpha-2).
 	Country *string
@@ -311,20 +312,60 @@ type AccessRuleParam struct {
 	// Everyone matches everyone (set to true).
 	Everyone *bool
 
-	// Certificate requires a valid client certificate (set to true).
-	Certificate *bool
-
-	// CommonName matches certificate common name.
-	CommonName *string
-
 	// ServiceTokenID matches a specific service token.
 	ServiceTokenID *string
 
 	// AnyValidServiceToken matches any valid service token.
 	AnyValidServiceToken *bool
 
+	// ============================================================
+	// P1: Basic IdP (Google Workspace)
+	// ============================================================
+
+	// Email matches a specific email address.
+	Email *string
+
+	// EmailListID matches emails from a Cloudflare Access list.
+	EmailListID *string
+
+	// EmailDomain matches an email domain.
+	EmailDomain *string
+
+	// OIDCClaim matches an OIDC token claim.
+	OIDCClaim *OIDCClaimParam
+
+	// ============================================================
+	// P2: Google Workspace Groups
+	// ============================================================
+
+	// GSuiteGroup matches Google Workspace group membership.
+	GSuiteGroup *GSuiteGroupParam
+
+	// ============================================================
+	// P3: v0.2.0 (not implemented in alpha.3)
+	// ============================================================
+
+	// Certificate requires a valid client certificate (set to true).
+	Certificate *bool
+
+	// CommonName matches certificate common name.
+	CommonName *string
+
 	// GroupID references an Access Group.
 	GroupID *string
+}
+
+// OIDCClaimParam represents an OIDC claim rule parameter.
+type OIDCClaimParam struct {
+	IdentityProviderID string
+	ClaimName          string
+	ClaimValue         string
+}
+
+// GSuiteGroupParam represents a Google Workspace group rule parameter.
+type GSuiteGroupParam struct {
+	IdentityProviderID string
+	Email              string // Group email address
 }
 
 // ApprovalGroupParam represents an approval configuration.
@@ -420,7 +461,7 @@ type CreateServiceTokenParams struct {
 	// Name is the token display name.
 	Name string
 
-	// Duration is the token validity period (e.g., "365d", "8760h").
+	// Duration is the token validity period in hours (e.g., "8760h" for 1 year).
 	Duration string
 }
 

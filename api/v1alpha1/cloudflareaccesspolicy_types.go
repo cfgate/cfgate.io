@@ -134,14 +134,17 @@ type AccessPolicyRule struct {
 
 	// Include rules (ANY must match for rule to apply).
 	// +optional
+	// +kubebuilder:validation:MaxItems=25
 	Include []AccessRule `json:"include,omitempty"`
 
 	// Exclude rules (if ANY match, rule does not apply).
 	// +optional
+	// +kubebuilder:validation:MaxItems=25
 	Exclude []AccessRule `json:"exclude,omitempty"`
 
 	// Require rules (ALL must match for rule to apply).
 	// +optional
+	// +kubebuilder:validation:MaxItems=25
 	Require []AccessRule `json:"require,omitempty"`
 
 	// SessionDuration overrides application session duration for this rule.
@@ -164,201 +167,249 @@ type AccessPolicyRule struct {
 
 	// ApprovalGroups defines who can approve access.
 	// +optional
+	// +kubebuilder:validation:MaxItems=10
 	ApprovalGroups []ApprovalGroup `json:"approvalGroups,omitempty"`
 }
 
 // AccessRule defines identity matching criteria.
-// +kubebuilder:validation:XValidation:rule="[has(self.email), has(self.emailDomain), has(self.emailListRef), has(self.ipRange), has(self.country), has(self.everyone), has(self.certificate), has(self.commonName), has(self.serviceToken), has(self.groupRef), has(self.gsuite), has(self.github), has(self.azure), has(self.okta), has(self.saml)].exists(x, x)",message="at least one rule type must be specified"
+// SDK types: IPRule, IPListRule, CountryRule, EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule,
+// EmailRule, DomainRule, EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
+//
+// +kubebuilder:validation:XValidation:rule="[has(self.ip), has(self.ipList), has(self.country), has(self.everyone), has(self.serviceToken), has(self.anyValidServiceToken), has(self.email), has(self.emailList), has(self.emailDomain), has(self.oidcClaim), has(self.gsuiteGroup)].exists(x, x)",message="at least one rule type must be specified"
 type AccessRule struct {
-	// Email matches specific email addresses.
-	// +optional
-	Email *EmailRule `json:"email,omitempty"`
+	// ============================================================
+	// P0: No IdP Required
+	// ============================================================
 
-	// EmailDomain matches email domain suffix.
+	// IP matches source IP CIDR ranges.
+	// SDK: IPRule
 	// +optional
-	EmailDomain *EmailDomainRule `json:"emailDomain,omitempty"`
+	IP *AccessIPRule `json:"ip,omitempty"`
 
-	// EmailListRef references a Cloudflare Access list.
+	// IPList references a Cloudflare IP List.
+	// SDK: IPListRule
 	// +optional
-	EmailListRef *AccessListRef `json:"emailListRef,omitempty"`
-
-	// IPRange matches source IP CIDR ranges.
-	// +optional
-	IPRange *IPRangeRule `json:"ipRange,omitempty"`
+	IPList *AccessIPListRule `json:"ipList,omitempty"`
 
 	// Country matches source country codes (ISO 3166-1 alpha-2).
+	// SDK: CountryRule
 	// +optional
-	Country *CountryRule `json:"country,omitempty"`
+	Country *AccessCountryRule `json:"country,omitempty"`
 
 	// Everyone matches all users (use with caution).
+	// SDK: EveryoneRule
 	// +optional
 	Everyone *bool `json:"everyone,omitempty"`
 
-	// Certificate requires valid mTLS certificate.
+	// ServiceToken matches a specific service token by ID.
+	// SDK: ServiceTokenRule
 	// +optional
-	Certificate *bool `json:"certificate,omitempty"`
+	ServiceToken *AccessServiceTokenRule `json:"serviceToken,omitempty"`
 
-	// CommonName matches certificate common name.
+	// AnyValidServiceToken matches any valid service token.
+	// SDK: AnyValidServiceTokenRule
 	// +optional
-	CommonName *CommonNameRule `json:"commonName,omitempty"`
+	AnyValidServiceToken *bool `json:"anyValidServiceToken,omitempty"`
 
-	// ServiceToken requires valid service token.
-	// +optional
-	ServiceToken *bool `json:"serviceToken,omitempty"`
+	// ============================================================
+	// P1: Basic IdP Required (Google Workspace)
+	// ============================================================
 
-	// GroupRef references an AccessGroup CR.
+	// Email matches specific email addresses.
+	// SDK: EmailRule
 	// +optional
-	GroupRef *AccessGroupRef `json:"groupRef,omitempty"`
+	Email *AccessEmailRule `json:"email,omitempty"`
 
-	// GSuite matches Google Workspace groups.
+	// EmailList references a Cloudflare Access email list.
+	// SDK: EmailListRule
 	// +optional
-	GSuite *GSuiteRule `json:"gsuite,omitempty"`
+	EmailList *AccessEmailListRule `json:"emailList,omitempty"`
 
-	// GitHub matches GitHub organization membership.
+	// EmailDomain matches email domain suffix.
+	// SDK: DomainRule
 	// +optional
-	GitHub *GitHubRule `json:"github,omitempty"`
+	EmailDomain *AccessEmailDomainRule `json:"emailDomain,omitempty"`
 
-	// Azure matches Azure AD groups.
+	// OIDCClaim matches OIDC token claims.
+	// SDK: AccessOIDCClaimRule
 	// +optional
-	Azure *AzureRule `json:"azure,omitempty"`
+	OIDCClaim *AccessOIDCClaimRule `json:"oidcClaim,omitempty"`
 
-	// Okta matches Okta groups.
-	// +optional
-	Okta *OktaRule `json:"okta,omitempty"`
+	// ============================================================
+	// P2: Google Workspace Groups
+	// ============================================================
 
-	// SAML matches SAML assertion attributes.
+	// GSuiteGroup matches Google Workspace groups.
+	// SDK: GSuiteGroupRule
 	// +optional
-	SAML *SAMLRule `json:"saml,omitempty"`
+	GSuiteGroup *AccessGSuiteGroupRule `json:"gsuiteGroup,omitempty"`
+
+	// ============================================================
+	// P3: Deferred to v0.2.0
+	// ============================================================
+	// The following rule types are NOT included in alpha.3:
+	// - Certificate (CertificateRule) - mTLS client cert
+	// - CommonName (AccessCommonNameRule) - mTLS CN matching
+	// - Group (GroupRule) - Access Groups
+	// - GitHub (GitHubOrganizationRule) - GitHub org/team
+	// - Azure (AzureGroupRule) - Azure AD groups
+	// - Okta (OktaGroupRule) - Okta groups
+	// - SAML (SAMLGroupRule) - SAML attributes
+	// - AuthenticationMethod (AuthenticationMethodRule) - MFA enforcement
+	// - DevicePosture (AccessDevicePostureRule) - Device compliance
+	// - ExternalEvaluation (ExternalEvaluationRule) - External eval
+	// - LoginMethod (AccessLoginMethodRule) - Login method
 }
 
-// EmailRule matches specific email addresses.
-type EmailRule struct {
+// ============================================================
+// P0 Rule Types (No IdP Required)
+// ============================================================
+
+// AccessIPRule matches source IP CIDR ranges.
+// Maps to SDK: IPRule
+type AccessIPRule struct {
+	// Ranges are CIDR blocks (IPv4 or IPv6).
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=50
+	Ranges []string `json:"ranges"`
+}
+
+// AccessIPListRule references a Cloudflare IP List.
+// Maps to SDK: IPListRule
+// +kubebuilder:validation:XValidation:rule="has(self.id) || has(self.name)",message="either id or name must be specified"
+type AccessIPListRule struct {
+	// ID of the IP list in Cloudflare.
+	// +optional
+	// +kubebuilder:validation:MaxLength=36
+	ID string `json:"id,omitempty"`
+
+	// Name of the IP list (looked up via API).
+	// +optional
+	// +kubebuilder:validation:MaxLength=255
+	Name string `json:"name,omitempty"`
+}
+
+// AccessCountryRule matches source country codes.
+// Maps to SDK: CountryRule
+type AccessCountryRule struct {
+	// Codes are ISO 3166-1 alpha-2 country codes.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=50
+	Codes []string `json:"codes"`
+}
+
+// AccessServiceTokenRule matches a specific service token.
+// Maps to SDK: ServiceTokenRule
+type AccessServiceTokenRule struct {
+	// TokenID is the Cloudflare service token ID.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=36
+	TokenID string `json:"tokenId"`
+}
+
+// ============================================================
+// P1 Rule Types (Basic IdP Required)
+// ============================================================
+
+// AccessEmailRule matches specific email addresses.
+// Maps to SDK: EmailRule
+type AccessEmailRule struct {
 	// Addresses to match.
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=50
 	Addresses []string `json:"addresses"`
 }
 
-// EmailDomainRule matches email domain suffix.
-type EmailDomainRule struct {
-	// Domain suffix (e.g., "example.com").
-	// +kubebuilder:validation:MinLength=1
-	Domain string `json:"domain"`
-}
-
-// AccessListRef references a Cloudflare Access list by ID or name.
-type AccessListRef struct {
+// AccessEmailListRule references a Cloudflare Access email list.
+// Maps to SDK: EmailListRule
+// +kubebuilder:validation:XValidation:rule="has(self.id) || has(self.name)",message="either id or name must be specified"
+type AccessEmailListRule struct {
 	// ID of the Access list in Cloudflare.
 	// +optional
+	// +kubebuilder:validation:MaxLength=36
 	ID string `json:"id,omitempty"`
 
 	// Name of the Access list (looked up via API).
 	// +optional
+	// +kubebuilder:validation:MaxLength=255
 	Name string `json:"name,omitempty"`
 }
 
-// IPRangeRule matches source IP CIDR ranges.
-type IPRangeRule struct {
-	// Ranges are CIDR blocks.
-	// +kubebuilder:validation:MinItems=1
-	Ranges []string `json:"ranges"`
-}
-
-// CountryRule matches source country codes.
-type CountryRule struct {
-	// Codes are ISO 3166-1 alpha-2 country codes.
-	// +kubebuilder:validation:MinItems=1
-	Codes []string `json:"codes"`
-}
-
-// CommonNameRule matches certificate common name.
-type CommonNameRule struct {
-	// Value is the expected common name.
+// AccessEmailDomainRule matches email domain suffix.
+// Maps to SDK: DomainRule
+type AccessEmailDomainRule struct {
+	// Domain suffix (e.g., "example.com").
 	// +kubebuilder:validation:MinLength=1
-	Value string `json:"value"`
+	// +kubebuilder:validation:MaxLength=255
+	Domain string `json:"domain"`
 }
+
+// AccessOIDCClaimRule matches OIDC token claims.
+// Maps to SDK: AccessOIDCClaimRule
+type AccessOIDCClaimRule struct {
+	// IdentityProviderID in Cloudflare.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=36
+	IdentityProviderID string `json:"identityProviderId"`
+
+	// ClaimName is the OIDC claim to match.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	ClaimName string `json:"claimName"`
+
+	// ClaimValue is the expected value.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	ClaimValue string `json:"claimValue"`
+}
+
+// ============================================================
+// P2 Rule Types (Google Workspace Groups)
+// ============================================================
+
+// AccessGSuiteGroupRule matches Google Workspace groups.
+// Maps to SDK: GSuiteGroupRule
+type AccessGSuiteGroupRule struct {
+	// IdentityProviderID in Cloudflare.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=36
+	IdentityProviderID string `json:"identityProviderId"`
+
+	// Email is the Google Workspace group email.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=320
+	Email string `json:"email"`
+}
+
+// ============================================================
+// Supporting Types
+// ============================================================
 
 // AccessGroupRef references an AccessGroup CR or Cloudflare group.
+// +kubebuilder:validation:XValidation:rule="has(self.name) || has(self.cloudflareId)",message="either name or cloudflareId must be specified"
 type AccessGroupRef struct {
 	// Name of AccessGroup CR in same namespace.
 	// +optional
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name,omitempty"`
 
 	// CloudflareID of group in Cloudflare (bypasses CR lookup).
 	// +optional
+	// +kubebuilder:validation:MaxLength=36
 	CloudflareID string `json:"cloudflareId,omitempty"`
 }
 
-// GSuiteRule matches Google Workspace groups.
-type GSuiteRule struct {
-	// IdentityProviderID in Cloudflare.
-	// +kubebuilder:validation:MinLength=1
-	IdentityProviderID string `json:"identityProviderId"`
-
-	// Groups to match.
-	// +optional
-	Groups []string `json:"groups,omitempty"`
-}
-
-// GitHubRule matches GitHub organization membership.
-type GitHubRule struct {
-	// IdentityProviderID in Cloudflare.
-	// +kubebuilder:validation:MinLength=1
-	IdentityProviderID string `json:"identityProviderId"`
-
-	// Organization name.
-	// +optional
-	Organization string `json:"organization,omitempty"`
-
-	// Teams within organization.
-	// +optional
-	Teams []string `json:"teams,omitempty"`
-}
-
-// AzureRule matches Azure AD groups.
-type AzureRule struct {
-	// IdentityProviderID in Cloudflare.
-	// +kubebuilder:validation:MinLength=1
-	IdentityProviderID string `json:"identityProviderId"`
-
-	// Groups are Azure AD group IDs.
-	// +optional
-	Groups []string `json:"groups,omitempty"`
-}
-
-// OktaRule matches Okta groups.
-type OktaRule struct {
-	// IdentityProviderID in Cloudflare.
-	// +kubebuilder:validation:MinLength=1
-	IdentityProviderID string `json:"identityProviderId"`
-
-	// Groups to match.
-	// +optional
-	Groups []string `json:"groups,omitempty"`
-}
-
-// SAMLRule matches SAML assertion attributes.
-type SAMLRule struct {
-	// IdentityProviderID in Cloudflare.
-	// +kubebuilder:validation:MinLength=1
-	IdentityProviderID string `json:"identityProviderId"`
-
-	// AttributeName to match.
-	// +kubebuilder:validation:MinLength=1
-	AttributeName string `json:"attributeName"`
-
-	// AttributeValue expected.
-	// +kubebuilder:validation:MinLength=1
-	AttributeValue string `json:"attributeValue"`
-}
-
 // ApprovalGroup defines who can approve access requests.
+// +kubebuilder:validation:XValidation:rule="size(self.emails) > 0 || has(self.emailDomain)",message="at least one approver (emails or emailDomain) must be specified"
 type ApprovalGroup struct {
 	// Emails of approvers.
 	// +optional
+	// +kubebuilder:validation:MaxItems=50
 	Emails []string `json:"emails,omitempty"`
 
 	// EmailDomain allows any user from domain to approve.
 	// +optional
+	// +kubebuilder:validation:MaxLength=255
 	EmailDomain string `json:"emailDomain,omitempty"`
 
 	// ApprovalsNeeded is number of approvals required.
@@ -374,9 +425,10 @@ type ServiceTokenConfig struct {
 	// +kubebuilder:validation:MaxLength=255
 	Name string `json:"name"`
 
-	// Duration is the token validity period.
-	// +kubebuilder:validation:Pattern=`^[0-9]+(h|d|y)$`
-	// +kubebuilder:default="365d"
+	// Duration is the token validity period using Go duration format.
+	// Only hours (h) supported by Cloudflare API. Use "8760h" for 1 year.
+	// +kubebuilder:validation:Pattern=`^[0-9]+h$`
+	// +kubebuilder:default="8760h"
 	Duration string `json:"duration,omitempty"`
 
 	// SecretRef stores the generated token credentials.
@@ -403,6 +455,7 @@ type MTLSConfig struct {
 
 	// AssociatedHostnames limits mTLS to specific hostnames.
 	// +optional
+	// +kubebuilder:validation:MaxItems=25
 	AssociatedHostnames []string `json:"associatedHostnames,omitempty"`
 
 	// RuleName is the name of the mTLS rule in Cloudflare.
@@ -432,6 +485,7 @@ type CloudflareAccessPolicySpec struct {
 
 	// TargetRefs identifies multiple targets for policy attachment.
 	// +optional
+	// +kubebuilder:validation:MaxItems=16
 	TargetRefs []PolicyTargetReference `json:"targetRefs,omitempty"`
 
 	// CloudflareRef references Cloudflare credentials (inherits from tunnel if omitted).
@@ -448,10 +502,12 @@ type CloudflareAccessPolicySpec struct {
 
 	// GroupRefs reference reusable identity rules.
 	// +optional
+	// +kubebuilder:validation:MaxItems=50
 	GroupRefs []AccessGroupRef `json:"groupRefs,omitempty"`
 
 	// ServiceTokens for machine-to-machine authentication.
 	// +optional
+	// +kubebuilder:validation:MaxItems=10
 	ServiceTokens []ServiceTokenConfig `json:"serviceTokens,omitempty"`
 
 	// MTLS configures certificate-based authentication.

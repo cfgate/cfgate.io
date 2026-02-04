@@ -22,13 +22,16 @@ type TunnelIdentity struct {
 }
 
 // CloudflareConfig defines the Cloudflare API credentials configuration.
+// +kubebuilder:validation:XValidation:rule="has(self.accountId) || has(self.accountName)",message="either accountId or accountName must be specified"
 type CloudflareConfig struct {
-	// AccountID is the Cloudflare Account ID. Required if accountName is not set.
+	// AccountID is the Cloudflare Account ID.
 	// +optional
+	// +kubebuilder:validation:MaxLength=32
 	AccountID string `json:"accountId,omitempty"`
 
 	// AccountName is the Cloudflare Account name. Will be looked up via API.
 	// +optional
+	// +kubebuilder:validation:MaxLength=255
 	AccountName string `json:"accountName,omitempty"`
 
 	// SecretRef references the Secret containing Cloudflare API credentials.
@@ -45,10 +48,13 @@ type CloudflareConfig struct {
 type SecretRef struct {
 	// Name of the secret.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 
 	// Namespace of the secret. Defaults to the tunnel's namespace.
 	// +optional
+	// +kubebuilder:validation:MaxLength=63
 	Namespace string `json:"namespace,omitempty"`
 }
 
@@ -57,10 +63,13 @@ type SecretRef struct {
 type SecretReference struct {
 	// Name of the secret.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 
 	// Namespace of the secret. Defaults to the resource's namespace if empty.
 	// +optional
+	// +kubebuilder:validation:MaxLength=63
 	Namespace string `json:"namespace,omitempty"`
 }
 
@@ -68,6 +77,7 @@ type SecretReference struct {
 type SecretKeys struct {
 	// APIToken is the key name for the Cloudflare API token.
 	// +kubebuilder:default=CLOUDFLARE_API_TOKEN
+	// +kubebuilder:validation:MaxLength=253
 	APIToken string `json:"apiToken,omitempty"`
 }
 
@@ -81,6 +91,7 @@ type CloudflaredConfig struct {
 
 	// Image is the cloudflared container image.
 	// +kubebuilder:default="cloudflare/cloudflared:latest"
+	// +kubebuilder:validation:MaxLength=255
 	Image string `json:"image,omitempty"`
 
 	// ImagePullPolicy is the pull policy for the cloudflared image.
@@ -99,18 +110,22 @@ type CloudflaredConfig struct {
 
 	// NodeSelector is a selector for nodes to run cloudflared on.
 	// +optional
+	// +kubebuilder:validation:MaxProperties=50
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 
 	// Tolerations are tolerations for the cloudflared pods.
 	// +optional
+	// +kubebuilder:validation:MaxItems=20
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 
 	// PodAnnotations are annotations to add to cloudflared pods.
 	// +optional
+	// +kubebuilder:validation:MaxProperties=50
 	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
 
 	// ExtraArgs are additional arguments to pass to cloudflared.
 	// +optional
+	// +kubebuilder:validation:MaxItems=20
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 
 	// Metrics configures the cloudflared metrics endpoint.
@@ -125,6 +140,8 @@ type MetricsConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
 
 	// Port is the port for the metrics endpoint.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	// +kubebuilder:default=44483
 	Port int32 `json:"port,omitempty"`
 }
@@ -133,6 +150,7 @@ type MetricsConfig struct {
 type OriginDefaults struct {
 	// ConnectTimeout is the timeout for connecting to the origin.
 	// +kubebuilder:default="30s"
+	// +kubebuilder:validation:Pattern=`^[0-9]+(s|m|h)$`
 	ConnectTimeout string `json:"connectTimeout,omitempty"`
 
 	// NoTLSVerify disables TLS verification for origin connections.
@@ -151,87 +169,15 @@ type OriginDefaults struct {
 // CAPoolSecretRef references a Secret containing CA certificates.
 type CAPoolSecretRef struct {
 	// Name of the secret.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 
 	// Key is the key within the secret data.
 	// +kubebuilder:default="ca.crt"
+	// +kubebuilder:validation:MaxLength=253
 	Key string `json:"key,omitempty"`
-}
-
-// DNSPolicy defines the DNS record lifecycle policy.
-// +kubebuilder:validation:Enum=sync;upsert-only;create-only
-type DNSPolicy string
-
-const (
-	// DNSPolicySync creates, updates, and deletes records (default).
-	DNSPolicySync DNSPolicy = "sync"
-	// DNSPolicyUpsertOnly creates and updates only, never deletes.
-	DNSPolicyUpsertOnly DNSPolicy = "upsert-only"
-	// DNSPolicyCreateOnly creates only, never updates or deletes.
-	DNSPolicyCreateOnly DNSPolicy = "create-only"
-)
-
-// TunnelDNSConfig defines DNS sync configuration for the tunnel.
-// +kubebuilder:validation:XValidation:rule="!self.enabled || size(self.zones) > 0",message="zones must be specified when dns is enabled"
-type TunnelDNSConfig struct {
-	// Enabled enables DNS sync for this tunnel.
-	// +kubebuilder:default=false
-	Enabled bool `json:"enabled,omitempty"`
-
-	// Policy is the DNS sync policy controlling record lifecycle.
-	// +kubebuilder:default=sync
-	Policy DNSPolicy `json:"policy,omitempty"`
-
-	// Zones is the list of DNS zones to manage.
-	// Required when enabled is true.
-	// +optional
-	Zones []TunnelZoneConfig `json:"zones,omitempty"`
-
-	// Ownership configures ownership tracking for DNS records.
-	// +optional
-	Ownership *TunnelOwnershipConfig `json:"ownership,omitempty"`
-
-	// CleanupPolicy configures record cleanup behavior.
-	// +optional
-	CleanupPolicy *TunnelCleanupPolicy `json:"cleanupPolicy,omitempty"`
-}
-
-// TunnelZoneConfig defines a DNS zone configuration for tunnel DNS sync.
-type TunnelZoneConfig struct {
-	// Name is the zone name (e.g., example.com).
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
-
-	// ProxiedDefault is the default proxied setting for records in this zone.
-	// If nil, the proxied setting is determined per-record.
-	// +optional
-	ProxiedDefault *bool `json:"proxiedDefault,omitempty"`
-}
-
-// TunnelOwnershipConfig configures ownership tracking for DNS records.
-type TunnelOwnershipConfig struct {
-	// TXTRecord configures TXT record ownership tracking.
-	// +optional
-	TXTRecord *TunnelTXTRecordConfig `json:"txtRecord,omitempty"`
-}
-
-// TunnelTXTRecordConfig configures TXT record ownership tracking.
-type TunnelTXTRecordConfig struct {
-	// Enabled enables TXT ownership records.
-	// +kubebuilder:default=true
-	Enabled bool `json:"enabled,omitempty"`
-
-	// Prefix is the TXT record name prefix.
-	// +kubebuilder:default="_cfgate"
-	Prefix string `json:"prefix,omitempty"`
-}
-
-// TunnelCleanupPolicy configures DNS record cleanup behavior for tunnel DNS sync.
-type TunnelCleanupPolicy struct {
-	// DeleteOnResourceRemoval enables deletion of DNS records when the source resource is removed.
-	// +kubebuilder:default=true
-	DeleteOnResourceRemoval bool `json:"deleteOnResourceRemoval,omitempty"`
 }
 
 // CloudflareTunnelSpec defines the desired state of CloudflareTunnel.
@@ -262,12 +208,6 @@ type CloudflareTunnelSpec struct {
 	// The secret must contain the same keys as the primary credentials secret.
 	// +optional
 	FallbackCredentialsRef *SecretReference `json:"fallbackCredentialsRef,omitempty"`
-
-	// DNS configures DNS sync for this tunnel.
-	// When enabled, the controller automatically creates CNAME records
-	// pointing hostnames from HTTPRoutes to the tunnel domain.
-	// +optional
-	DNS *TunnelDNSConfig `json:"dns,omitempty"`
 }
 
 // CloudflareTunnelStatus defines the observed state of CloudflareTunnel.
@@ -299,13 +239,6 @@ type CloudflareTunnelStatus struct {
 
 	// ConnectedRouteCount is the number of routes connected to this tunnel.
 	ConnectedRouteCount int32 `json:"connectedRouteCount,omitempty"`
-
-	// DNSRecordCount is the number of DNS records managed by this tunnel.
-	DNSRecordCount int32 `json:"dnsRecordCount,omitempty"`
-
-	// LastDNSSyncTime is the last time DNS records were synced to Cloudflare.
-	// +optional
-	LastDNSSyncTime *metav1.Time `json:"lastDNSSyncTime,omitempty"`
 
 	// Conditions represent the latest available observations of the tunnel's state.
 	// +patchMergeKey=type

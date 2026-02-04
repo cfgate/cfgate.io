@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	cf "github.com/cloudflare/cloudflare-go/v6"
+	"github.com/cloudflare/cloudflare-go/v6/accounts"
 	"github.com/cloudflare/cloudflare-go/v6/dns"
 	"github.com/cloudflare/cloudflare-go/v6/option"
 	"github.com/cloudflare/cloudflare-go/v6/zero_trust"
@@ -15,7 +17,20 @@ import (
 )
 
 // ClientOption is a functional option for configuring the client.
-type ClientOption func(*clientImpl)
+type ClientOption func(*clientOptions)
+
+// clientOptions holds configuration for creating a client.
+type clientOptions struct {
+	httpClient *http.Client
+}
+
+// WithHTTPClient sets a custom HTTP client for the Cloudflare API.
+// Useful for testing or custom transport configuration.
+func WithHTTPClient(httpClient *http.Client) ClientOption {
+	return func(opts *clientOptions) {
+		opts.httpClient = httpClient
+	}
+}
 
 // clientImpl implements the Client interface using cloudflare-go v6 SDK.
 type clientImpl struct {
@@ -28,16 +43,24 @@ func NewClient(apiToken string, opts ...ClientOption) (Client, error) {
 		return nil, errors.New("API token is required")
 	}
 
-	api := cf.NewClient(
+	// Apply functional options
+	clientOpts := &clientOptions{}
+	for _, opt := range opts {
+		opt(clientOpts)
+	}
+
+	// Build cloudflare-go options
+	cfOpts := []option.RequestOption{
 		option.WithAPIToken(apiToken),
-	)
+	}
+	if clientOpts.httpClient != nil {
+		cfOpts = append(cfOpts, option.WithHTTPClient(clientOpts.httpClient))
+	}
+
+	api := cf.NewClient(cfOpts...)
 
 	c := &clientImpl{
 		api: api,
-	}
-
-	for _, opt := range opts {
-		opt(c)
 	}
 
 	return c, nil
@@ -431,6 +454,46 @@ func (c *clientImpl) ValidateToken(ctx context.Context, accountID string) error 
 	return nil
 }
 
+// ListAccounts lists all accounts accessible with the current credentials.
+// Uses direct List() instead of ListAutoPaging() to avoid SDK pagination bug
+// (cloudflare-python#2584) where has_next_page() incorrectly returns true
+// with account-scoped tokens, causing infinite loops.
+func (c *clientImpl) ListAccounts(ctx context.Context) ([]Account, error) {
+	resp, err := c.api.Accounts.List(ctx, accounts.AccountListParams{
+		PerPage: cf.F(float64(50)), // Most users have < 50 accounts
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts: %w", err)
+	}
+
+	var result []Account
+	for _, acc := range resp.Result {
+		result = append(result, Account{
+			ID:   acc.ID,
+			Name: acc.Name,
+		})
+	}
+
+	return result, nil
+}
+
+// GetAccountByName retrieves an account by name.
+// Returns nil if the account does not exist.
+func (c *clientImpl) GetAccountByName(ctx context.Context, name string) (*Account, error) {
+	accounts, err := c.ListAccounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, acc := range accounts {
+		if acc.Name == name {
+			return &acc, nil
+		}
+	}
+
+	return nil, nil
+}
+
 // tunnelFromAPI converts a Cloudflare API tunnel to our Tunnel type.
 func tunnelFromAPI(t *zero_trust.CloudflareTunnel) *Tunnel {
 	if t == nil {
@@ -688,6 +751,22 @@ func (c *clientImpl) GetAccessApplicationByName(ctx context.Context, accountID, 
 
 // CreateAccessPolicy creates a new Access policy for an application.
 func (c *clientImpl) CreateAccessPolicy(ctx context.Context, accountID, appID string, params CreatePolicyParams) (*AccessPolicy, error) {
+	// Build request options with fields missing from SDK's NewParams struct.
+	// cloudflare-go v6.6.0 doesn't include name, decision, include, exclude, require in NewParams.
+	opts := []option.RequestOption{
+		option.WithJSONSet("name", params.Name),
+		option.WithJSONSet("decision", params.Decision),
+	}
+	if len(params.Include) > 0 {
+		opts = append(opts, option.WithJSONSet("include", accessRulesToAPI(params.Include)))
+	}
+	if len(params.Exclude) > 0 {
+		opts = append(opts, option.WithJSONSet("exclude", accessRulesToAPI(params.Exclude)))
+	}
+	if len(params.Require) > 0 {
+		opts = append(opts, option.WithJSONSet("require", accessRulesToAPI(params.Require)))
+	}
+
 	result, err := c.api.ZeroTrust.Access.Applications.Policies.New(ctx, appID, zero_trust.AccessApplicationPolicyNewParams{
 		AccountID:                    cf.F(accountID),
 		Precedence:                   cf.F(int64(params.Precedence)),
@@ -695,7 +774,7 @@ func (c *clientImpl) CreateAccessPolicy(ctx context.Context, accountID, appID st
 		PurposeJustificationRequired: cf.F(params.PurposeJustificationRequired),
 		PurposeJustificationPrompt:   cf.F(params.PurposeJustificationPrompt),
 		ApprovalRequired:             cf.F(params.ApprovalRequired),
-	})
+	}, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create access policy: %w", err)
 	}
@@ -720,6 +799,21 @@ func (c *clientImpl) GetAccessPolicy(ctx context.Context, accountID, appID, poli
 
 // UpdateAccessPolicy updates an existing Access policy.
 func (c *clientImpl) UpdateAccessPolicy(ctx context.Context, accountID, appID, policyID string, params UpdatePolicyParams) (*AccessPolicy, error) {
+	// Build request options with fields missing from SDK's UpdateParams struct.
+	opts := []option.RequestOption{
+		option.WithJSONSet("name", params.Name),
+		option.WithJSONSet("decision", params.Decision),
+	}
+	if len(params.Include) > 0 {
+		opts = append(opts, option.WithJSONSet("include", accessRulesToAPI(params.Include)))
+	}
+	if len(params.Exclude) > 0 {
+		opts = append(opts, option.WithJSONSet("exclude", accessRulesToAPI(params.Exclude)))
+	}
+	if len(params.Require) > 0 {
+		opts = append(opts, option.WithJSONSet("require", accessRulesToAPI(params.Require)))
+	}
+
 	result, err := c.api.ZeroTrust.Access.Applications.Policies.Update(ctx, appID, policyID, zero_trust.AccessApplicationPolicyUpdateParams{
 		AccountID:                    cf.F(accountID),
 		Precedence:                   cf.F(int64(params.Precedence)),
@@ -727,7 +821,7 @@ func (c *clientImpl) UpdateAccessPolicy(ctx context.Context, accountID, appID, p
 		PurposeJustificationRequired: cf.F(params.PurposeJustificationRequired),
 		PurposeJustificationPrompt:   cf.F(params.PurposeJustificationPrompt),
 		ApprovalRequired:             cf.F(params.ApprovalRequired),
-	})
+	}, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update access policy: %w", err)
 	}
@@ -1479,6 +1573,56 @@ func accessRuleToAPI(rule *AccessRuleParam) zero_trust.AccessRuleUnionParam {
 		return nil
 	}
 
+	// ============================================================
+	// P0: No IdP required
+	// ============================================================
+
+	// IPRange -> zero_trust.IPRuleParam
+	if rule.IPRange != nil {
+		return zero_trust.IPRuleParam{
+			IP: cf.F(zero_trust.IPRuleIPParam{
+				IP: cf.F(*rule.IPRange),
+			}),
+		}
+	}
+
+	// Country -> zero_trust.CountryRuleParam
+	if rule.Country != nil {
+		return zero_trust.CountryRuleParam{
+			Geo: cf.F(zero_trust.CountryRuleGeoParam{
+				CountryCode: cf.F(*rule.Country),
+			}),
+		}
+	}
+
+	// Everyone -> zero_trust.EveryoneRuleParam
+	if rule.Everyone != nil && *rule.Everyone {
+		return zero_trust.EveryoneRuleParam{
+			Everyone: cf.F(zero_trust.EveryoneRuleEveryoneParam{}),
+		}
+	}
+
+	// ServiceTokenID -> zero_trust.ServiceTokenRuleParam
+	if rule.ServiceTokenID != nil {
+		return zero_trust.ServiceTokenRuleParam{
+			ServiceToken: cf.F(zero_trust.ServiceTokenRuleServiceTokenParam{
+				TokenID: cf.F(*rule.ServiceTokenID),
+			}),
+		}
+	}
+
+	// AnyValidServiceToken -> zero_trust.AnyValidServiceTokenRuleParam
+	if rule.AnyValidServiceToken != nil && *rule.AnyValidServiceToken {
+		return zero_trust.AnyValidServiceTokenRuleParam{
+			AnyValidServiceToken: cf.F(zero_trust.AnyValidServiceTokenRuleAnyValidServiceTokenParam{}),
+		}
+	}
+
+	// ============================================================
+	// P1: Basic IdP (Google Workspace)
+	// ============================================================
+
+	// Email -> zero_trust.EmailRuleParam
 	if rule.Email != nil {
 		return zero_trust.EmailRuleParam{
 			Email: cf.F(zero_trust.EmailRuleEmailParam{
@@ -1487,6 +1631,8 @@ func accessRuleToAPI(rule *AccessRuleParam) zero_trust.AccessRuleUnionParam {
 		}
 	}
 
+	// EmailDomain -> zero_trust.DomainRuleParam
+	// Note: SDK type is "DomainRule" not "EmailDomainRule"
 	if rule.EmailDomain != nil {
 		return zero_trust.DomainRuleParam{
 			EmailDomain: cf.F(zero_trust.DomainRuleEmailDomainParam{
@@ -1495,19 +1641,34 @@ func accessRuleToAPI(rule *AccessRuleParam) zero_trust.AccessRuleUnionParam {
 		}
 	}
 
-	if rule.Everyone != nil && *rule.Everyone {
-		return zero_trust.EveryoneRuleParam{
-			Everyone: cf.F(zero_trust.EveryoneRuleEveryoneParam{}),
-		}
-	}
-
-	if rule.IPRange != nil {
-		return zero_trust.IPRuleParam{
-			IP: cf.F(zero_trust.IPRuleIPParam{
-				IP: cf.F(*rule.IPRange),
+	// OIDCClaim -> zero_trust.AccessRuleAccessOIDCClaimRuleParam
+	if rule.OIDCClaim != nil {
+		return zero_trust.AccessRuleAccessOIDCClaimRuleParam{
+			OIDC: cf.F(zero_trust.AccessRuleAccessOIDCClaimRuleOIDCParam{
+				IdentityProviderID: cf.F(rule.OIDCClaim.IdentityProviderID),
+				ClaimName:          cf.F(rule.OIDCClaim.ClaimName),
+				ClaimValue:         cf.F(rule.OIDCClaim.ClaimValue),
 			}),
 		}
 	}
+
+	// ============================================================
+	// P2: Google Workspace Groups
+	// ============================================================
+
+	// GSuiteGroup -> zero_trust.GSuiteGroupRuleParam
+	if rule.GSuiteGroup != nil {
+		return zero_trust.GSuiteGroupRuleParam{
+			GSuite: cf.F(zero_trust.GSuiteGroupRuleGSuiteParam{
+				IdentityProviderID: cf.F(rule.GSuiteGroup.IdentityProviderID),
+				Email:              cf.F(rule.GSuiteGroup.Email),
+			}),
+		}
+	}
+
+	// ============================================================
+	// P3: v0.2.0 (kept for backward compatibility)
+	// ============================================================
 
 	if rule.Certificate != nil && *rule.Certificate {
 		return zero_trust.CertificateRuleParam{
@@ -1519,28 +1680,6 @@ func accessRuleToAPI(rule *AccessRuleParam) zero_trust.AccessRuleUnionParam {
 		return zero_trust.GroupRuleParam{
 			Group: cf.F(zero_trust.GroupRuleGroupParam{
 				ID: cf.F(*rule.GroupID),
-			}),
-		}
-	}
-
-	if rule.ServiceTokenID != nil {
-		return zero_trust.ServiceTokenRuleParam{
-			ServiceToken: cf.F(zero_trust.ServiceTokenRuleServiceTokenParam{
-				TokenID: cf.F(*rule.ServiceTokenID),
-			}),
-		}
-	}
-
-	if rule.AnyValidServiceToken != nil && *rule.AnyValidServiceToken {
-		return zero_trust.AnyValidServiceTokenRuleParam{
-			AnyValidServiceToken: cf.F(zero_trust.AnyValidServiceTokenRuleAnyValidServiceTokenParam{}),
-		}
-	}
-
-	if rule.Country != nil {
-		return zero_trust.CountryRuleParam{
-			Geo: cf.F(zero_trust.CountryRuleGeoParam{
-				CountryCode: cf.F(*rule.Country),
 			}),
 		}
 	}

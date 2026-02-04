@@ -23,10 +23,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gateway "sigs.k8s.io/gateway-api/apis/v1"
+	gwapiv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 	gatewayv1b1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	cfgatev1alpha1 "cfgate.io/cfgate/api/v1alpha1"
 	"cfgate.io/cfgate/internal/cloudflare"
+	"cfgate.io/cfgate/internal/controller/annotations"
 	ctxwrappers "cfgate.io/cfgate/internal/controller/context"
 	"cfgate.io/cfgate/internal/controller/features"
 	"cfgate.io/cfgate/internal/controller/status"
@@ -266,7 +268,8 @@ func (r *CloudflareAccessPolicyReconciler) reconcilePhases(ctx context.Context, 
 	policy.Status.ObservedGeneration = generation
 	r.updateAncestorStatuses(policy, policyCtx)
 
-	readyCondition := status.NewAccessPolicyReadyCondition(policy.Status.Conditions, generation)
+	hasServiceTokens := len(policy.Spec.ServiceTokens) > 0
+	readyCondition := status.NewAccessPolicyReadyCondition(policy.Status.Conditions, hasServiceTokens, generation)
 	policy.Status.Conditions = status.MergeConditions(policy.Status.Conditions, readyCondition)
 
 	if err := r.updateStatus(ctx, policy); err != nil {
@@ -357,7 +360,7 @@ func (r *CloudflareAccessPolicyReconciler) inheritCredentialsFromTunnel(
 			continue
 		}
 
-		tunnelRef, ok := gw.Annotations[AnnotationTunnelRef]
+		tunnelRef, ok := gw.Annotations[annotations.AnnotationTunnelRef]
 		if !ok {
 			continue
 		}
@@ -606,32 +609,17 @@ func (r *CloudflareAccessPolicyReconciler) syncPolicies(
 }
 
 // convertAccessRules converts CRD AccessRule to API AccessRuleParam.
+// Implements P0/P1/P2 rule types for alpha.3 (SDK-aligned naming).
 func convertAccessRules(crdRules []cfgatev1alpha1.AccessRule) []cloudflare.AccessRuleParam {
 	var rules []cloudflare.AccessRuleParam
 	for _, r := range crdRules {
-		// Handle email addresses
-		if r.Email != nil {
-			for _, addr := range r.Email.Addresses {
-				addrCopy := addr
-				rules = append(rules, cloudflare.AccessRuleParam{
-					Email: &addrCopy,
-				})
-			}
-			continue
-		}
+		// ============================================================
+		// P0: No IdP required
+		// ============================================================
 
-		// Handle email domain
-		if r.EmailDomain != nil {
-			domain := r.EmailDomain.Domain
-			rules = append(rules, cloudflare.AccessRuleParam{
-				EmailDomain: &domain,
-			})
-			continue
-		}
-
-		// Handle IP ranges
-		if r.IPRange != nil {
-			for _, cidr := range r.IPRange.Ranges {
+		// IP ranges -> multiple rules (SDK: IPRule)
+		if r.IP != nil {
+			for _, cidr := range r.IP.Ranges {
 				cidrCopy := cidr
 				rules = append(rules, cloudflare.AccessRuleParam{
 					IPRange: &cidrCopy,
@@ -640,7 +628,16 @@ func convertAccessRules(crdRules []cfgatev1alpha1.AccessRule) []cloudflare.Acces
 			continue
 		}
 
-		// Handle country codes
+		// IPList -> by ID (SDK: IPListRule)
+		if r.IPList != nil && r.IPList.ID != "" {
+			id := r.IPList.ID
+			rules = append(rules, cloudflare.AccessRuleParam{
+				IPListID: &id,
+			})
+			continue
+		}
+
+		// Country codes -> multiple rules (SDK: CountryRule)
 		if r.Country != nil {
 			for _, code := range r.Country.Codes {
 				codeCopy := code
@@ -651,7 +648,7 @@ func convertAccessRules(crdRules []cfgatev1alpha1.AccessRule) []cloudflare.Acces
 			continue
 		}
 
-		// Handle everyone
+		// Everyone (SDK: EveryoneRule)
 		if r.Everyone != nil && *r.Everyone {
 			everyone := true
 			rules = append(rules, cloudflare.AccessRuleParam{
@@ -660,17 +657,17 @@ func convertAccessRules(crdRules []cfgatev1alpha1.AccessRule) []cloudflare.Acces
 			continue
 		}
 
-		// Handle certificate
-		if r.Certificate != nil && *r.Certificate {
-			cert := true
+		// ServiceToken by ID (SDK: ServiceTokenRule)
+		if r.ServiceToken != nil && r.ServiceToken.TokenID != "" {
+			tokenID := r.ServiceToken.TokenID
 			rules = append(rules, cloudflare.AccessRuleParam{
-				Certificate: &cert,
+				ServiceTokenID: &tokenID,
 			})
 			continue
 		}
 
-		// Handle service token
-		if r.ServiceToken != nil && *r.ServiceToken {
+		// AnyValidServiceToken (SDK: AnyValidServiceTokenRule)
+		if r.AnyValidServiceToken != nil && *r.AnyValidServiceToken {
 			anyValid := true
 			rules = append(rules, cloudflare.AccessRuleParam{
 				AnyValidServiceToken: &anyValid,
@@ -678,23 +675,71 @@ func convertAccessRules(crdRules []cfgatev1alpha1.AccessRule) []cloudflare.Acces
 			continue
 		}
 
-		// Handle common name
-		if r.CommonName != nil {
-			cn := r.CommonName.Value
+		// ============================================================
+		// P1: Basic IdP required (Google Workspace)
+		// ============================================================
+
+		// Email addresses -> multiple rules (SDK: EmailRule)
+		if r.Email != nil {
+			for _, addr := range r.Email.Addresses {
+				addrCopy := addr
+				rules = append(rules, cloudflare.AccessRuleParam{
+					Email: &addrCopy,
+				})
+			}
+			continue
+		}
+
+		// EmailList -> by ID (SDK: EmailListRule)
+		if r.EmailList != nil && r.EmailList.ID != "" {
+			id := r.EmailList.ID
 			rules = append(rules, cloudflare.AccessRuleParam{
-				CommonName: &cn,
+				EmailListID: &id,
 			})
 			continue
 		}
 
-		// Handle access group reference
-		if r.GroupRef != nil && r.GroupRef.CloudflareID != "" {
-			groupID := r.GroupRef.CloudflareID
+		// EmailDomain (SDK: DomainRule)
+		if r.EmailDomain != nil {
+			domain := r.EmailDomain.Domain
 			rules = append(rules, cloudflare.AccessRuleParam{
-				GroupID: &groupID,
+				EmailDomain: &domain,
 			})
 			continue
 		}
+
+		// OIDCClaim (SDK: AccessOIDCClaimRule)
+		if r.OIDCClaim != nil {
+			rules = append(rules, cloudflare.AccessRuleParam{
+				OIDCClaim: &cloudflare.OIDCClaimParam{
+					IdentityProviderID: r.OIDCClaim.IdentityProviderID,
+					ClaimName:          r.OIDCClaim.ClaimName,
+					ClaimValue:         r.OIDCClaim.ClaimValue,
+				},
+			})
+			continue
+		}
+
+		// ============================================================
+		// P2: Google Workspace Groups
+		// ============================================================
+
+		// GSuiteGroup (SDK: GSuiteGroupRule)
+		if r.GSuiteGroup != nil {
+			rules = append(rules, cloudflare.AccessRuleParam{
+				GSuiteGroup: &cloudflare.GSuiteGroupParam{
+					IdentityProviderID: r.GSuiteGroup.IdentityProviderID,
+					Email:              r.GSuiteGroup.Email,
+				},
+			})
+			continue
+		}
+
+		// ============================================================
+		// P3: v0.2.0 - Not implemented in alpha.3
+		// ============================================================
+		// Certificate, CommonName, Group, GitHub, Azure, Okta, SAML,
+		// AuthenticationMethod, DevicePosture, ExternalEvaluation, LoginMethod
 	}
 	return rules
 }
@@ -1095,6 +1140,24 @@ func (r *CloudflareAccessPolicyReconciler) SetupWithManager(mgr ctrl.Manager) er
 		)
 	}
 
+	// Conditionally watch TCPRoute
+	if r.FeatureGates != nil && r.FeatureGates.HasTCPRouteSupport() {
+		controllerBuilder = controllerBuilder.Watches(
+			&gwapiv1alpha2.TCPRoute{},
+			handler.EnqueueRequestsFromMapFunc(r.findPoliciesForTCPRoute),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		)
+	}
+
+	// Conditionally watch UDPRoute
+	if r.FeatureGates != nil && r.FeatureGates.HasUDPRouteSupport() {
+		controllerBuilder = controllerBuilder.Watches(
+			&gwapiv1alpha2.UDPRoute{},
+			handler.EnqueueRequestsFromMapFunc(r.findPoliciesForUDPRoute),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		)
+	}
+
 	// Conditionally watch ReferenceGrant
 	if r.FeatureGates != nil && r.FeatureGates.HasReferenceGrantSupport() {
 		controllerBuilder = controllerBuilder.Watches(
@@ -1115,6 +1178,16 @@ func (r *CloudflareAccessPolicyReconciler) findPoliciesForHTTPRoute(ctx context.
 // findPoliciesForGRPCRoute returns reconcile requests for policies targeting this GRPCRoute.
 func (r *CloudflareAccessPolicyReconciler) findPoliciesForGRPCRoute(ctx context.Context, obj client.Object) []reconcile.Request {
 	return r.findPoliciesForTarget(ctx, "GRPCRoute", obj)
+}
+
+// findPoliciesForTCPRoute returns reconcile requests for policies targeting this TCPRoute.
+func (r *CloudflareAccessPolicyReconciler) findPoliciesForTCPRoute(ctx context.Context, obj client.Object) []reconcile.Request {
+	return r.findPoliciesForTarget(ctx, "TCPRoute", obj)
+}
+
+// findPoliciesForUDPRoute returns reconcile requests for policies targeting this UDPRoute.
+func (r *CloudflareAccessPolicyReconciler) findPoliciesForUDPRoute(ctx context.Context, obj client.Object) []reconcile.Request {
+	return r.findPoliciesForTarget(ctx, "UDPRoute", obj)
 }
 
 // findPoliciesForTarget finds all policies targeting a specific object.

@@ -50,9 +50,18 @@ const (
 
 	// ConditionTypeDeploymentReady indicates cloudflared deployment is ready.
 	ConditionTypeDeploymentReady = "DeploymentReady"
+)
 
-	// ConditionTypeDNSSynced indicates DNS records are synced.
-	ConditionTypeDNSSynced = "DNSSynced"
+// cfgate-specific condition types for CloudflareDNS.
+const (
+	// ConditionTypeZonesResolved indicates zones are resolved via API.
+	ConditionTypeZonesResolved = "ZonesResolved"
+
+	// ConditionTypeRecordsSynced indicates DNS records are synced.
+	ConditionTypeRecordsSynced = "RecordsSynced"
+
+	// ConditionTypeOwnershipVerified indicates ownership TXT records verified.
+	ConditionTypeOwnershipVerified = "OwnershipVerified"
 )
 
 // cfgate-specific condition types for CloudflareAccessPolicy.
@@ -65,6 +74,27 @@ const (
 
 	// ConditionTypePoliciesAttached indicates Access Policies are attached.
 	ConditionTypePoliciesAttached = "PoliciesAttached"
+
+	// ConditionTypeServiceTokensReady indicates service tokens are ready.
+	ConditionTypeServiceTokensReady = "ServiceTokensReady"
+)
+
+// Policy condition types for Gateway API Policy status.
+const (
+	// PolicyConditionAccepted indicates policy is accepted by the controller.
+	PolicyConditionAccepted = "Accepted"
+
+	// PolicyReasonAccepted indicates policy was accepted.
+	PolicyReasonAccepted = "Accepted"
+
+	// PolicyReasonTargetNotFound indicates target resource not found.
+	PolicyReasonTargetNotFound = "TargetNotFound"
+
+	// PolicyReasonConflicted indicates policy conflicts with another.
+	PolicyReasonConflicted = "Conflicted"
+
+	// PolicyReasonInvalid indicates policy is invalid.
+	PolicyReasonInvalid = "Invalid"
 )
 
 // Reasons for condition status changes.
@@ -95,9 +125,12 @@ const (
 	ReasonDeploymentError    = "DeploymentError"
 
 	// DNS reasons.
-	ReasonDNSSynced    = "DNSSynced"
-	ReasonDNSSyncError = "DNSSyncError"
-	ReasonDNSDisabled  = "DNSDisabled"
+	ReasonZonesResolved        = "ZonesResolved"
+	ReasonZoneResolutionFailed = "ZoneResolutionFailed"
+	ReasonRecordsSynced        = "RecordsSynced"
+	ReasonRecordSyncFailed     = "RecordSyncFailed"
+	ReasonOwnershipVerified    = "OwnershipVerified"
+	ReasonOwnershipFailed      = "OwnershipFailed"
 
 	// Access Policy reasons.
 	ReasonTargetsResolved    = "TargetsResolved"
@@ -106,24 +139,8 @@ const (
 	ReasonApplicationError   = "ApplicationError"
 	ReasonPoliciesAttached   = "PoliciesAttached"
 	ReasonPolicyError        = "PolicyError"
-)
-
-// Policy condition types for Gateway API Policy status.
-const (
-	// PolicyConditionAccepted indicates policy is accepted by the controller.
-	PolicyConditionAccepted = "Accepted"
-
-	// PolicyReasonAccepted indicates policy was accepted.
-	PolicyReasonAccepted = "Accepted"
-
-	// PolicyReasonTargetNotFound indicates target resource not found.
-	PolicyReasonTargetNotFound = "TargetNotFound"
-
-	// PolicyReasonConflicted indicates policy conflicts with another.
-	PolicyReasonConflicted = "Conflicted"
-
-	// PolicyReasonInvalid indicates policy is invalid.
-	PolicyReasonInvalid = "Invalid"
+	ReasonServiceTokensReady = "ServiceTokensReady"
+	ReasonServiceTokenError  = "ServiceTokenError"
 )
 
 // MergeConditions merges condition updates into an existing condition slice.
@@ -278,7 +295,7 @@ func ConditionUnknown(conditions []metav1.Condition, conditionType string) bool 
 	return c == nil || c.Status == metav1.ConditionUnknown
 }
 
-// --- Domain-Specific Builders for CloudflareTunnel ---
+// --- CloudflareTunnel Condition Constructors ---
 
 // NewCredentialsValidCondition creates a CredentialsValid condition.
 func NewCredentialsValidCondition(valid bool, reason, message string, generation int64) metav1.Condition {
@@ -316,15 +333,6 @@ func NewDeploymentReadyCondition(ready bool, reason, message string, generation 
 	return NewCondition(ConditionTypeDeploymentReady, status, reason, message, generation)
 }
 
-// NewDNSSyncedCondition creates a DNSSynced condition.
-func NewDNSSyncedCondition(synced bool, reason, message string, generation int64) metav1.Condition {
-	status := metav1.ConditionFalse
-	if synced {
-		status = metav1.ConditionTrue
-	}
-	return NewCondition(ConditionTypeDNSSynced, status, reason, message, generation)
-}
-
 // NewTunnelReadyCondition creates the overall Ready condition for CloudflareTunnel.
 // Ready = CredentialsValid AND TunnelCreated AND TunnelConfigured AND DeploymentReady
 func NewTunnelReadyCondition(conditions []metav1.Condition, generation int64) metav1.Condition {
@@ -356,7 +364,65 @@ func NewTunnelReadyCondition(conditions []metav1.Condition, generation int64) me
 		ReasonReconciling, "Reconciling tunnel.", generation)
 }
 
-// --- Domain-Specific Builders for CloudflareAccessPolicy ---
+// --- CloudflareDNS Condition Constructors ---
+
+// NewZonesResolvedCondition creates a ZonesResolved condition.
+func NewZonesResolvedCondition(resolved bool, reason, message string, generation int64) metav1.Condition {
+	status := metav1.ConditionFalse
+	if resolved {
+		status = metav1.ConditionTrue
+	}
+	return NewCondition(ConditionTypeZonesResolved, status, reason, message, generation)
+}
+
+// NewRecordsSyncedCondition creates a RecordsSynced condition.
+func NewRecordsSyncedCondition(synced bool, reason, message string, generation int64) metav1.Condition {
+	status := metav1.ConditionFalse
+	if synced {
+		status = metav1.ConditionTrue
+	}
+	return NewCondition(ConditionTypeRecordsSynced, status, reason, message, generation)
+}
+
+// NewOwnershipVerifiedCondition creates an OwnershipVerified condition.
+func NewOwnershipVerifiedCondition(verified bool, reason, message string, generation int64) metav1.Condition {
+	status := metav1.ConditionFalse
+	if verified {
+		status = metav1.ConditionTrue
+	}
+	return NewCondition(ConditionTypeOwnershipVerified, status, reason, message, generation)
+}
+
+// NewDNSReadyCondition creates the overall Ready condition for CloudflareDNS.
+// Ready = CredentialsValid AND ZonesResolved AND RecordsSynced
+func NewDNSReadyCondition(conditions []metav1.Condition, generation int64) metav1.Condition {
+	ready := ConditionTrue(conditions, ConditionTypeCredentialsValid) &&
+		ConditionTrue(conditions, ConditionTypeZonesResolved) &&
+		ConditionTrue(conditions, ConditionTypeRecordsSynced)
+
+	if ready {
+		return NewCondition(ConditionTypeReady, metav1.ConditionTrue,
+			ReasonReconcileSuccess, "DNS sync is ready.", generation)
+	}
+
+	// Find first failing condition for message
+	for _, t := range []string{
+		ConditionTypeCredentialsValid,
+		ConditionTypeZonesResolved,
+		ConditionTypeRecordsSynced,
+	} {
+		c := FindCondition(conditions, t)
+		if c != nil && c.Status != metav1.ConditionTrue {
+			return NewCondition(ConditionTypeReady, metav1.ConditionFalse,
+				c.Reason, c.Message, generation)
+		}
+	}
+
+	return NewCondition(ConditionTypeReady, metav1.ConditionUnknown,
+		ReasonReconciling, "Reconciling DNS sync.", generation)
+}
+
+// --- CloudflareAccessPolicy Condition Constructors ---
 
 // NewTargetsResolvedCondition creates a TargetsResolved condition.
 func NewTargetsResolvedCondition(resolved bool, reason, message string, generation int64) metav1.Condition {
@@ -385,12 +451,28 @@ func NewPoliciesAttachedCondition(attached bool, reason, message string, generat
 	return NewCondition(ConditionTypePoliciesAttached, status, reason, message, generation)
 }
 
+// NewServiceTokensReadyCondition creates a ServiceTokensReady condition.
+func NewServiceTokensReadyCondition(ready bool, reason, message string, generation int64) metav1.Condition {
+	status := metav1.ConditionFalse
+	if ready {
+		status = metav1.ConditionTrue
+	}
+	return NewCondition(ConditionTypeServiceTokensReady, status, reason, message, generation)
+}
+
 // NewAccessPolicyReadyCondition creates the overall Ready condition for CloudflareAccessPolicy.
-// Ready = TargetsResolved AND ApplicationCreated AND PoliciesAttached
-func NewAccessPolicyReadyCondition(conditions []metav1.Condition, generation int64) metav1.Condition {
-	ready := ConditionTrue(conditions, ConditionTypeTargetsResolved) &&
+// Ready = CredentialsValid AND TargetsResolved AND ApplicationCreated AND PoliciesAttached
+// ServiceTokensReady is optional (only required if serviceTokens configured)
+func NewAccessPolicyReadyCondition(conditions []metav1.Condition, hasServiceTokens bool, generation int64) metav1.Condition {
+	ready := ConditionTrue(conditions, ConditionTypeCredentialsValid) &&
+		ConditionTrue(conditions, ConditionTypeTargetsResolved) &&
 		ConditionTrue(conditions, ConditionTypeApplicationCreated) &&
 		ConditionTrue(conditions, ConditionTypePoliciesAttached)
+
+	// ServiceTokensReady required only if service tokens configured
+	if hasServiceTokens {
+		ready = ready && ConditionTrue(conditions, ConditionTypeServiceTokensReady)
+	}
 
 	if ready {
 		return NewCondition(ConditionTypeReady, metav1.ConditionTrue,
@@ -398,11 +480,17 @@ func NewAccessPolicyReadyCondition(conditions []metav1.Condition, generation int
 	}
 
 	// Find first failing condition for message
-	for _, t := range []string{
+	checkOrder := []string{
+		ConditionTypeCredentialsValid,
 		ConditionTypeTargetsResolved,
 		ConditionTypeApplicationCreated,
 		ConditionTypePoliciesAttached,
-	} {
+	}
+	if hasServiceTokens {
+		checkOrder = append(checkOrder, ConditionTypeServiceTokensReady)
+	}
+
+	for _, t := range checkOrder {
 		c := FindCondition(conditions, t)
 		if c != nil && c.Status != metav1.ConditionTrue {
 			return NewCondition(ConditionTypeReady, metav1.ConditionFalse,
@@ -412,6 +500,15 @@ func NewAccessPolicyReadyCondition(conditions []metav1.Condition, generation int
 
 	return NewCondition(ConditionTypeReady, metav1.ConditionUnknown,
 		ReasonReconciling, "Reconciling access policy.", generation)
+}
+
+// NewPolicyAcceptedCondition creates an Accepted condition for policy status.
+func NewPolicyAcceptedCondition(accepted bool, reason, message string, generation int64) metav1.Condition {
+	status := metav1.ConditionFalse
+	if accepted {
+		status = metav1.ConditionTrue
+	}
+	return NewCondition(PolicyConditionAccepted, status, reason, message, generation)
 }
 
 // --- Gateway API PolicyStatus Helpers ---
@@ -481,15 +578,6 @@ func ancestorRefEqual(a, b gwapiv1.ParentReference) bool {
 
 	// Compare Name
 	return a.Name == b.Name
-}
-
-// NewPolicyAcceptedCondition creates an Accepted condition for policy status.
-func NewPolicyAcceptedCondition(accepted bool, reason, message string, generation int64) metav1.Condition {
-	status := metav1.ConditionFalse
-	if accepted {
-		status = metav1.ConditionTrue
-	}
-	return NewCondition(PolicyConditionAccepted, status, reason, message, generation)
 }
 
 // --- Logging Patterns ---

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,6 +30,9 @@ import (
 // TunnelContext wraps CloudflareTunnel with computed state and helper methods.
 // It provides a clean interface for reconcilers to work with tunnels without
 // repeatedly computing derived values.
+//
+// Note: DNS management is handled separately by CloudflareDNS CRD.
+// TunnelContext is tunnel-only and does not manage DNS records.
 type TunnelContext struct {
 	// Embedded tunnel resource
 	*cfgatev1alpha1.CloudflareTunnel
@@ -36,7 +40,6 @@ type TunnelContext struct {
 	// Computed fields (populated by NewTunnelContext)
 	resolvedAccountID string
 	tunnelClient      cloudflare.Client
-	dnsClient         *cloudflare.DNSService
 
 	// Logger for this context
 	log logr.Logger
@@ -48,7 +51,6 @@ func NewTunnelContext(
 	tunnel *cfgatev1alpha1.CloudflareTunnel,
 	accountID string,
 	tunnelClient cloudflare.Client,
-	dnsClient *cloudflare.DNSService,
 ) *TunnelContext {
 	log := ctrl.Log.WithName("context").WithName("tunnel").
 		WithValues("tunnel", tunnel.Namespace+"/"+tunnel.Name)
@@ -57,68 +59,8 @@ func NewTunnelContext(
 		CloudflareTunnel:  tunnel,
 		resolvedAccountID: accountID,
 		tunnelClient:      tunnelClient,
-		dnsClient:         dnsClient,
 		log:               log,
 	}
-}
-
-// HasDNSEnabled returns true if DNS sync is enabled for this tunnel.
-func (tc *TunnelContext) HasDNSEnabled() bool {
-	return tc.Spec.DNS != nil && tc.Spec.DNS.Enabled
-}
-
-// GetZones returns configured DNS zones (empty if DNS disabled).
-func (tc *TunnelContext) GetZones() []cfgatev1alpha1.TunnelZoneConfig {
-	if tc.Spec.DNS == nil {
-		return nil
-	}
-	return tc.Spec.DNS.Zones
-}
-
-// GetOwnershipPrefix returns the TXT ownership record prefix.
-// Defaults to "_cfgate" if not configured.
-func (tc *TunnelContext) GetOwnershipPrefix() string {
-	if tc.Spec.DNS == nil ||
-		tc.Spec.DNS.Ownership == nil ||
-		tc.Spec.DNS.Ownership.TXTRecord == nil ||
-		tc.Spec.DNS.Ownership.TXTRecord.Prefix == "" {
-		return "_cfgate"
-	}
-	return tc.Spec.DNS.Ownership.TXTRecord.Prefix
-}
-
-// GetOwnerIdentifier returns the unique owner identifier for TXT records.
-// Format: <namespace>/<name>
-func (tc *TunnelContext) GetOwnerIdentifier() string {
-	return tc.Namespace + "/" + tc.Name
-}
-
-// GetDNSPolicy returns the configured DNS policy (defaults to "sync").
-func (tc *TunnelContext) GetDNSPolicy() cfgatev1alpha1.DNSPolicy {
-	if tc.Spec.DNS == nil || tc.Spec.DNS.Policy == "" {
-		return cfgatev1alpha1.DNSPolicySync
-	}
-	return tc.Spec.DNS.Policy
-}
-
-// ShouldCreateTXTRecords returns true if TXT ownership records should be created.
-func (tc *TunnelContext) ShouldCreateTXTRecords() bool {
-	if tc.Spec.DNS == nil ||
-		tc.Spec.DNS.Ownership == nil ||
-		tc.Spec.DNS.Ownership.TXTRecord == nil {
-		return true // default enabled
-	}
-	return tc.Spec.DNS.Ownership.TXTRecord.Enabled
-}
-
-// ShouldDeleteOnRemoval returns true if DNS records should be deleted
-// when source resources are removed.
-func (tc *TunnelContext) ShouldDeleteOnRemoval() bool {
-	if tc.Spec.DNS == nil ||
-		tc.Spec.DNS.CleanupPolicy == nil {
-		return true // default enabled
-	}
-	return tc.Spec.DNS.CleanupPolicy.DeleteOnResourceRemoval
 }
 
 // AccountID returns the resolved Cloudflare account ID.
@@ -131,9 +73,268 @@ func (tc *TunnelContext) TunnelClient() cloudflare.Client {
 	return tc.tunnelClient
 }
 
-// DNSClient returns the DNS API client (nil if DNS disabled).
-func (tc *TunnelContext) DNSClient() *cloudflare.DNSService {
-	return tc.dnsClient
+// -----------------------------------------------------------------------------
+// DNSContext
+// -----------------------------------------------------------------------------
+
+// DNSContext wraps CloudflareDNS with resolved dependencies.
+// It provides a clean interface for the DNSReconciler to manage DNS records
+// independent of the tunnel reconciler.
+type DNSContext struct {
+	// Embedded DNS resource
+	*cfgatev1alpha1.CloudflareDNS
+
+	// Resolved tunnel reference (nil if using externalTarget)
+	resolvedTunnel *cfgatev1alpha1.CloudflareTunnel
+	tunnelDomain   string // Cached from tunnel status
+
+	// Resolved zones (name -> zone ID mapping)
+	resolvedZones map[string]string
+
+	// DNS client for API operations
+	dnsClient *cloudflare.DNSService
+
+	// Logger for this context
+	log logr.Logger
+}
+
+// NewDNSContext creates a DNSContext with resolved tunnel and zones.
+// Returns error if the tunnel cannot be resolved (when tunnelRef is specified).
+func NewDNSContext(
+	ctx context.Context,
+	dns *cfgatev1alpha1.CloudflareDNS,
+	k8sClient client.Client,
+	dnsClient *cloudflare.DNSService,
+) (*DNSContext, error) {
+	log := ctrl.Log.WithName("context").WithName("dns").
+		WithValues("dns", dns.Namespace+"/"+dns.Name)
+
+	dc := &DNSContext{
+		CloudflareDNS: dns,
+		resolvedZones: make(map[string]string),
+		dnsClient:     dnsClient,
+		log:           log,
+	}
+
+	// Resolve tunnel reference if specified
+	if dns.Spec.TunnelRef != nil {
+		tunnelNamespace := dns.Spec.TunnelRef.Namespace
+		if tunnelNamespace == "" {
+			tunnelNamespace = dns.Namespace
+		}
+
+		var tunnel cfgatev1alpha1.CloudflareTunnel
+		tunnelKey := types.NamespacedName{
+			Namespace: tunnelNamespace,
+			Name:      dns.Spec.TunnelRef.Name,
+		}
+		if err := k8sClient.Get(ctx, tunnelKey, &tunnel); err != nil {
+			if apierrors.IsNotFound(err) {
+				log.V(1).Info("referenced tunnel not found", "tunnel", tunnelKey)
+				return nil, fmt.Errorf("tunnel %s not found", tunnelKey)
+			}
+			return nil, fmt.Errorf("fetching tunnel: %w", err)
+		}
+
+		// Check tunnel has required status fields
+		if tunnel.Status.TunnelDomain == "" {
+			log.V(1).Info("tunnel domain not yet available", "tunnel", tunnelKey)
+			return nil, fmt.Errorf("tunnel %s domain not ready", tunnelKey)
+		}
+
+		dc.resolvedTunnel = &tunnel
+		dc.tunnelDomain = tunnel.Status.TunnelDomain
+	} else if dns.Spec.ExternalTarget != nil {
+		// External target - use the value directly as the target
+		dc.tunnelDomain = dns.Spec.ExternalTarget.Value
+	}
+
+	// Resolve zones to IDs
+	for _, zone := range dns.Spec.Zones {
+		if zone.ID != "" {
+			dc.resolvedZones[zone.Name] = zone.ID
+		} else {
+			// Zone ID will be resolved lazily during sync
+			dc.resolvedZones[zone.Name] = ""
+		}
+	}
+
+	return dc, nil
+}
+
+// ResolvedTunnel returns the resolved CloudflareTunnel (nil if using externalTarget).
+func (dc *DNSContext) ResolvedTunnel() *cfgatev1alpha1.CloudflareTunnel {
+	return dc.resolvedTunnel
+}
+
+// TunnelDomain returns the tunnel's CNAME target domain (e.g., {tunnelId}.cfargotunnel.com)
+// or the external target value.
+func (dc *DNSContext) TunnelDomain() string {
+	return dc.tunnelDomain
+}
+
+// TunnelName returns the tunnel's name (empty if using externalTarget).
+func (dc *DNSContext) TunnelName() string {
+	if dc.resolvedTunnel == nil {
+		return ""
+	}
+	return dc.resolvedTunnel.Spec.Tunnel.Name
+}
+
+// TunnelNamespacedName returns the tunnel's namespaced name.
+// Returns empty NamespacedName if using externalTarget.
+func (dc *DNSContext) TunnelNamespacedName() types.NamespacedName {
+	if dc.resolvedTunnel == nil {
+		return types.NamespacedName{}
+	}
+	return types.NamespacedName{
+		Namespace: dc.resolvedTunnel.Namespace,
+		Name:      dc.resolvedTunnel.Name,
+	}
+}
+
+// HasTunnelRef returns true if this DNS context uses a tunnel reference.
+func (dc *DNSContext) HasTunnelRef() bool {
+	return dc.Spec.TunnelRef != nil
+}
+
+// HasExternalTarget returns true if this DNS context uses an external target.
+func (dc *DNSContext) HasExternalTarget() bool {
+	return dc.Spec.ExternalTarget != nil
+}
+
+// ResolvedZones returns the zone name to ID mapping.
+// IDs may be empty if not pre-configured and not yet resolved.
+func (dc *DNSContext) ResolvedZones() map[string]string {
+	return dc.resolvedZones
+}
+
+// SetResolvedZoneID updates the zone ID after API lookup.
+func (dc *DNSContext) SetResolvedZoneID(zoneName, zoneID string) {
+	dc.resolvedZones[zoneName] = zoneID
+}
+
+// GetZoneID returns the zone ID for a zone name.
+// Returns empty string if not resolved.
+func (dc *DNSContext) GetZoneID(zoneName string) string {
+	return dc.resolvedZones[zoneName]
+}
+
+// ZoneForHostname returns the matching zone for a hostname.
+// Uses suffix matching against configured zones.
+func (dc *DNSContext) ZoneForHostname(hostname string) (string, bool) {
+	for _, zone := range dc.Spec.Zones {
+		if strings.HasSuffix(hostname, zone.Name) || hostname == zone.Name {
+			return zone.Name, true
+		}
+	}
+	return "", false
+}
+
+// HasGatewayRoutesEnabled returns true if Gateway API routes are a hostname source.
+func (dc *DNSContext) HasGatewayRoutesEnabled() bool {
+	return dc.Spec.Source.GatewayRoutes.Enabled
+}
+
+// GetAnnotationFilter returns the annotation filter for route selection.
+func (dc *DNSContext) GetAnnotationFilter() string {
+	return dc.Spec.Source.GatewayRoutes.AnnotationFilter
+}
+
+// GetExplicitHostnames returns explicitly configured hostnames.
+func (dc *DNSContext) GetExplicitHostnames() []cfgatev1alpha1.DNSExplicitHostname {
+	return dc.Spec.Source.Explicit
+}
+
+// GetDefaultProxied returns the default proxied setting.
+func (dc *DNSContext) GetDefaultProxied() bool {
+	return dc.Spec.Defaults.Proxied
+}
+
+// GetDefaultTTL returns the default TTL (1 for auto, or explicit value).
+func (dc *DNSContext) GetDefaultTTL() int32 {
+	if dc.Spec.Defaults.TTL == 0 {
+		return 1 // auto
+	}
+	return dc.Spec.Defaults.TTL
+}
+
+// GetPolicy returns the DNS policy (defaults to sync).
+func (dc *DNSContext) GetPolicy() cfgatev1alpha1.DNSPolicy {
+	if dc.Spec.Policy == "" {
+		return cfgatev1alpha1.DNSPolicySync
+	}
+	return dc.Spec.Policy
+}
+
+// GetOwnerID returns the owner identifier for TXT records.
+// Defaults to namespace/name if not explicitly configured.
+func (dc *DNSContext) GetOwnerID() string {
+	if dc.Spec.Ownership.OwnerID != "" {
+		return dc.Spec.Ownership.OwnerID
+	}
+	return dc.Namespace + "/" + dc.Name
+}
+
+// GetOwnershipPrefix returns the TXT ownership record prefix.
+func (dc *DNSContext) GetOwnershipPrefix() string {
+	if dc.Spec.Ownership.TXTRecord.Prefix == "" {
+		return "_cfgate"
+	}
+	return dc.Spec.Ownership.TXTRecord.Prefix
+}
+
+// ShouldCreateTXTRecords returns true if TXT ownership tracking is enabled.
+func (dc *DNSContext) ShouldCreateTXTRecords() bool {
+	if dc.Spec.Ownership.TXTRecord.Enabled == nil {
+		return true // default enabled
+	}
+	return *dc.Spec.Ownership.TXTRecord.Enabled
+}
+
+// ShouldUseCommentOwnership returns true if comment-based ownership is enabled.
+func (dc *DNSContext) ShouldUseCommentOwnership() bool {
+	return dc.Spec.Ownership.Comment.Enabled
+}
+
+// GetCommentTemplate returns the comment template for ownership.
+func (dc *DNSContext) GetCommentTemplate() string {
+	if dc.Spec.Ownership.Comment.Template == "" {
+		return "managed by cfgate"
+	}
+	return dc.Spec.Ownership.Comment.Template
+}
+
+// ShouldDeleteOnRouteRemoval returns true if records should be deleted when routes are removed.
+// nil defaults to true (delete by default).
+func (dc *DNSContext) ShouldDeleteOnRouteRemoval() bool {
+	if dc.Spec.CleanupPolicy.DeleteOnRouteRemoval == nil {
+		return true // default
+	}
+	return *dc.Spec.CleanupPolicy.DeleteOnRouteRemoval
+}
+
+// ShouldDeleteOnResourceRemoval returns true if records should be deleted when CloudflareDNS is deleted.
+// nil defaults to true (delete by default).
+func (dc *DNSContext) ShouldDeleteOnResourceRemoval() bool {
+	if dc.Spec.CleanupPolicy.DeleteOnResourceRemoval == nil {
+		return true // default
+	}
+	return *dc.Spec.CleanupPolicy.DeleteOnResourceRemoval
+}
+
+// OnlyDeleteManaged returns true if only cfgate-managed records should be cleaned up.
+// nil defaults to true (only managed by default).
+func (dc *DNSContext) OnlyDeleteManaged() bool {
+	if dc.Spec.CleanupPolicy.OnlyManaged == nil {
+		return true // default
+	}
+	return *dc.Spec.CleanupPolicy.OnlyManaged
+}
+
+// DNSClient returns the DNS API client.
+func (dc *DNSContext) DNSClient() *cloudflare.DNSService {
+	return dc.dnsClient
 }
 
 // -----------------------------------------------------------------------------
@@ -342,6 +543,21 @@ func (ti *TargetInfo) IsGateway() bool {
 	return ti.Kind == "Gateway"
 }
 
+// IsTCPRoute returns true if target is a TCPRoute.
+func (ti *TargetInfo) IsTCPRoute() bool {
+	return ti.Kind == "TCPRoute"
+}
+
+// IsUDPRoute returns true if target is a UDPRoute.
+func (ti *TargetInfo) IsUDPRoute() bool {
+	return ti.Kind == "UDPRoute"
+}
+
+// IsGRPCRoute returns true if target is a GRPCRoute.
+func (ti *TargetInfo) IsGRPCRoute() bool {
+	return ti.Kind == "GRPCRoute"
+}
+
 // -----------------------------------------------------------------------------
 // RouteContext
 // -----------------------------------------------------------------------------
@@ -519,6 +735,8 @@ func (rc *RouteContext) GetAccessPolicyAnnotation() string {
 
 // BuildTunnelContext creates a TunnelContext with full initialization.
 // Returns nil and logs warning if tunnel not found.
+//
+// Note: DNS is handled separately by CloudflareDNS CRD and its reconciler.
 func BuildTunnelContext(
 	ctx context.Context,
 	k8sClient client.Client,
@@ -538,14 +756,31 @@ func BuildTunnelContext(
 		return nil, fmt.Errorf("fetching tunnel: %w", err)
 	}
 
-	// Create DNS service if DNS enabled
-	var dnsClient *cloudflare.DNSService
-	if tunnel.Spec.DNS != nil && tunnel.Spec.DNS.Enabled {
-		dnsClient = cloudflare.NewDNSService(cfClient)
-		log.V(1).Info("DNS client created", "zones", len(tunnel.Spec.DNS.Zones))
+	return NewTunnelContext(&tunnel, accountID, cfClient), nil
+}
+
+// BuildDNSContext creates a DNSContext with resolved tunnel and zones.
+// Returns nil if DNS resource not found.
+func BuildDNSContext(
+	ctx context.Context,
+	k8sClient client.Client,
+	dnsClient *cloudflare.DNSService,
+	ref types.NamespacedName,
+) (*DNSContext, error) {
+	log := ctrl.Log.WithName("context").WithValues("dns", ref)
+
+	// Fetch DNS resource
+	var dns cfgatev1alpha1.CloudflareDNS
+	if err := k8sClient.Get(ctx, ref, &dns); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.V(1).Info("dns resource not found")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("fetching dns: %w", err)
 	}
 
-	return NewTunnelContext(&tunnel, accountID, cfClient, dnsClient), nil
+	// Build context (resolves tunnel reference if specified)
+	return NewDNSContext(ctx, &dns, k8sClient, dnsClient)
 }
 
 // BuildAccessPolicyContext creates an AccessPolicyContext with full initialization.

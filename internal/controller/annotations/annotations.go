@@ -1,6 +1,7 @@
 package annotations
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -8,6 +9,16 @@ import (
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+// Standard errors for annotation validation.
+var (
+	ErrMissingHostnameAnnotation = errors.New("missing required hostname annotation")
+	ErrInvalidHostnameFormat     = errors.New("invalid hostname format")
+	ErrInvalidProtocol           = errors.New("invalid origin protocol")
+	ErrInvalidTTL                = errors.New("invalid TTL value")
+	ErrMissingTunnelRef          = errors.New("missing tunnel reference annotation")
+	ErrInvalidTunnelRefFormat    = errors.New("invalid tunnel reference format")
 )
 
 // AnnotationPrefix is the prefix for all cfgate annotations.
