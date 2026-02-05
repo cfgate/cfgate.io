@@ -35,7 +35,21 @@ spec:
       openAPIV3Schema:
         description: |-
           CloudflareTunnel is the Schema for the cloudflaretunnels API.
-          It manages the Cloudflare Tunnel lifecycle independent of routing.
+
+          CloudflareTunnel manages the lifecycle of a Cloudflare Tunnel and its cloudflared daemon
+          deployment. It handles tunnel creation or adoption, credential management, and deploys
+          cloudflared pods that establish secure connections to Cloudflare's edge network.
+
+          CloudflareTunnel follows a composable architecture where tunnel lifecycle is separate from
+          DNS management. Use CloudflareDNS with a tunnelRef to create DNS records pointing to this
+          tunnel's domain.
+
+          Status conditions:
+            - Ready: tunnel is fully operational
+            - CredentialsValid: API credentials have been validated
+            - TunnelCreated: tunnel exists in Cloudflare
+            - ConfigurationSynced: ingress configuration is synced
+            - DeploymentReady: cloudflared pods are running
         properties:
           apiVersion:
             description: |-
@@ -55,7 +69,12 @@ spec:
           metadata:
             type: object
           spec:
-            description: CloudflareTunnelSpec defines the desired state of CloudflareTunnel.
+            description: |-
+              CloudflareTunnelSpec defines the desired state of a CloudflareTunnel resource.
+
+              CloudflareTunnelSpec configures the tunnel identity, Cloudflare credentials, cloudflared
+              deployment settings, and origin connection defaults. The tunnel manages lifecycle only;
+              DNS records are managed separately via CloudflareDNS resources.
             properties:
               cloudflare:
                 description: Cloudflare defines the Cloudflare API credentials.
@@ -352,7 +371,12 @@ spec:
             - tunnel
             type: object
           status:
-            description: CloudflareTunnelStatus defines the observed state of CloudflareTunnel.
+            description: |-
+              CloudflareTunnelStatus defines the observed state of a CloudflareTunnel resource.
+
+              CloudflareTunnelStatus captures the tunnel's Cloudflare-assigned identifiers, deployment
+              status, and reconciliation state. The TunnelDomain field provides the CNAME target
+              ({tunnelId}.cfargotunnel.com) that CloudflareDNS uses for DNS record creation.
             properties:
               accountId:
                 description: AccountID is the resolved Cloudflare account ID.

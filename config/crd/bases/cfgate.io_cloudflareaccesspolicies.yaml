@@ -34,8 +34,28 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          CloudflareAccessPolicy is the Schema for the cloudflareaccespolicies API.
-          It manages Cloudflare Access Applications and Policies for zero-trust access control.
+          CloudflareAccessPolicy is the Schema for the cloudflareaccesspolicies API.
+
+          CloudflareAccessPolicy manages Cloudflare Access Applications and Policies for zero-trust
+          access control. It attaches to Gateway API resources (Gateway, HTTPRoute, GRPCRoute,
+          TCPRoute, UDPRoute) using the targetRefs pattern and creates corresponding Access
+          Applications in Cloudflare.
+
+          Access rules are organized into implementation tiers based on IdP requirements:
+            - P0: IP, IPList, Country, Everyone, ServiceToken, AnyValidServiceToken (no IdP)
+            - P1: Email, EmailList, EmailDomain, OIDCClaim (basic IdP required)
+            - P2: GSuiteGroup (Google Workspace required)
+            - P3: deferred to v0.2.0 (Certificate, CommonName, Group, GitHub, Azure, Okta, SAML, etc.)
+
+          Status conditions:
+            - Ready: policy is fully applied to all targets
+            - CredentialsValid: Cloudflare credentials have been validated
+            - TargetsResolved: all targetRefs have been found and validated
+            - ReferenceGrantValid: cross-namespace references are authorized
+            - ApplicationCreated: Access Application exists in Cloudflare
+            - PoliciesAttached: Access policies are attached to the application
+            - ServiceTokensReady: all service tokens have been created
+            - MTLSConfigured: mTLS rule is configured (if enabled)
         properties:
           apiVersion:
             description: |-
@@ -55,7 +75,12 @@ spec:
           metadata:
             type: object
           spec:
-            description: CloudflareAccessPolicySpec defines the desired state of CloudflareAccessPolicy.
+            description: |-
+              CloudflareAccessPolicySpec defines the desired state of a CloudflareAccessPolicy resource.
+
+              CloudflareAccessPolicySpec configures Cloudflare Access protection for Gateway API resources.
+              It specifies which resources to protect (via targetRef/targetRefs), the Access Application
+              settings, and the access policies that control who can access the protected hostnames.
             properties:
               application:
                 description: Application defines the Access Application settings.
@@ -149,8 +174,12 @@ spec:
               groupRefs:
                 description: GroupRefs reference reusable identity rules.
                 items:
-                  description: AccessGroupRef references an AccessGroup CR or Cloudflare
-                    group.
+                  description: |-
+                    AccessGroupRef references a Cloudflare Access Group.
+
+                    AccessGroupRef enables referencing reusable identity rules defined as Access Groups
+                    in Cloudflare. Groups can be referenced by Kubernetes CR name (future feature) or
+                    by Cloudflare ID.
                   properties:
                     cloudflareId:
                       description: CloudflareID of group in Cloudflare (bypasses CR
@@ -206,13 +235,22 @@ spec:
               policies:
                 description: Policies define access rules (evaluated in order).
                 items:
-                  description: AccessPolicyRule defines an access allow/deny rule.
+                  description: |-
+                    AccessPolicyRule defines an access allow, deny, bypass, or non_identity rule.
+
+                    AccessPolicyRule specifies who can access the protected application. Rules are evaluated
+                    in precedence order (lower precedence = higher priority). Each rule contains Include
+                    (ANY must match), Exclude (if ANY match, rule does not apply), and Require (ALL must match)
+                    conditions.
                   properties:
                     approvalGroups:
                       description: ApprovalGroups defines who can approve access.
                       items:
-                        description: ApprovalGroup defines who can approve access
-                          requests.
+                        description: |-
+                          ApprovalGroup defines who can approve access requests for approval-required policies.
+
+                          ApprovalGroup specifies approvers by email address or email domain. When a policy
+                          requires approval, users matching this group can approve or deny access requests.
                         properties:
                           approvalsNeeded:
                             default: 1
@@ -255,9 +293,18 @@ spec:
                       description: Exclude rules (if ANY match, rule does not apply).
                       items:
                         description: |-
-                          AccessRule defines identity matching criteria.
-                          SDK types: IPRule, IPListRule, CountryRule, EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule,
-                          EmailRule, DomainRule, EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
+                          AccessRule defines identity matching criteria for Access policies.
+
+                          AccessRule specifies conditions that identify users or services. Rules are organized
+                          into implementation tiers based on IdP requirements:
+                            - P0 (no IdP): IP, IPList, Country, Everyone, ServiceToken, AnyValidServiceToken
+                            - P1 (basic IdP): Email, EmailList, EmailDomain, OIDCClaim
+                            - P2 (Google Workspace): GSuiteGroup
+                            - P3 (deferred to v0.2.0): Certificate, CommonName, Group, GitHub, Azure, Okta, SAML, etc.
+
+                          SDK types map directly to cloudflare-go v6.6.0: IPRule, IPListRule, CountryRule,
+                          EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule, EmailRule, DomainRule,
+                          EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
                         properties:
                           anyValidServiceToken:
                             description: |-
@@ -435,9 +482,18 @@ spec:
                       description: Include rules (ANY must match for rule to apply).
                       items:
                         description: |-
-                          AccessRule defines identity matching criteria.
-                          SDK types: IPRule, IPListRule, CountryRule, EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule,
-                          EmailRule, DomainRule, EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
+                          AccessRule defines identity matching criteria for Access policies.
+
+                          AccessRule specifies conditions that identify users or services. Rules are organized
+                          into implementation tiers based on IdP requirements:
+                            - P0 (no IdP): IP, IPList, Country, Everyone, ServiceToken, AnyValidServiceToken
+                            - P1 (basic IdP): Email, EmailList, EmailDomain, OIDCClaim
+                            - P2 (Google Workspace): GSuiteGroup
+                            - P3 (deferred to v0.2.0): Certificate, CommonName, Group, GitHub, Azure, Okta, SAML, etc.
+
+                          SDK types map directly to cloudflare-go v6.6.0: IPRule, IPListRule, CountryRule,
+                          EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule, EmailRule, DomainRule,
+                          EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
                         properties:
                           anyValidServiceToken:
                             description: |-
@@ -635,9 +691,18 @@ spec:
                       description: Require rules (ALL must match for rule to apply).
                       items:
                         description: |-
-                          AccessRule defines identity matching criteria.
-                          SDK types: IPRule, IPListRule, CountryRule, EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule,
-                          EmailRule, DomainRule, EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
+                          AccessRule defines identity matching criteria for Access policies.
+
+                          AccessRule specifies conditions that identify users or services. Rules are organized
+                          into implementation tiers based on IdP requirements:
+                            - P0 (no IdP): IP, IPList, Country, Everyone, ServiceToken, AnyValidServiceToken
+                            - P1 (basic IdP): Email, EmailList, EmailDomain, OIDCClaim
+                            - P2 (Google Workspace): GSuiteGroup
+                            - P3 (deferred to v0.2.0): Certificate, CommonName, Group, GitHub, Azure, Okta, SAML, etc.
+
+                          SDK types map directly to cloudflare-go v6.6.0: IPRule, IPListRule, CountryRule,
+                          EveryoneRule, ServiceTokenRule, AnyValidServiceTokenRule, EmailRule, DomainRule,
+                          EmailListRule, AccessOIDCClaimRule, GSuiteGroupRule.
                         properties:
                           anyValidServiceToken:
                             description: |-
@@ -824,7 +889,12 @@ spec:
               serviceTokens:
                 description: ServiceTokens for machine-to-machine authentication.
                 items:
-                  description: ServiceTokenConfig defines machine-to-machine authentication.
+                  description: |-
+                    ServiceTokenConfig defines configuration for Cloudflare Access service tokens.
+
+                    ServiceTokenConfig enables machine-to-machine authentication. The controller creates
+                    the service token in Cloudflare and stores the credentials (client ID and secret) in
+                    the referenced Kubernetes Secret. The secret is only visible at creation time.
                   properties:
                     duration:
                       default: 8760h
@@ -900,8 +970,15 @@ spec:
                 description: TargetRefs identifies multiple targets for policy attachment.
                 items:
                   description: |-
-                    PolicyTargetReference identifies a target for policy attachment.
-                    Based on Gateway API LocalPolicyTargetReferenceWithSectionName.
+                    PolicyTargetReference identifies a Gateway API resource for Access policy attachment.
+
+                    PolicyTargetReference follows the Gateway API LocalPolicyTargetReferenceWithSectionName
+                    pattern for policy attachment. It targets Gateway API resources (Gateway, HTTPRoute,
+                    GRPCRoute, TCPRoute, UDPRoute) and extracts hostnames from those resources to create
+                    corresponding Cloudflare Access applications.
+
+                    Cross-namespace references require a ReferenceGrant in the target namespace that permits
+                    CloudflareAccessPolicy resources from the policy's namespace.
                   properties:
                     group:
                       default: gateway.networking.k8s.io
@@ -953,16 +1030,22 @@ spec:
             - message: targetRef and targetRefs are mutually exclusive
               rule: '!(has(self.targetRef) && has(self.targetRefs))'
           status:
-            description: CloudflareAccessPolicyStatus defines the observed state of
-              CloudflareAccessPolicy.
+            description: |-
+              CloudflareAccessPolicyStatus defines the observed state of a CloudflareAccessPolicy resource.
+
+              CloudflareAccessPolicyStatus captures the Cloudflare-assigned identifiers for the
+              Access Application and policies, service token mappings, and per-target attachment status.
             properties:
               ancestors:
                 description: Ancestors contains status for each targetRef (Gateway
                   API PolicyStatus).
                 items:
                   description: |-
-                    PolicyAncestorStatus describes attachment status per target.
-                    Follows Gateway API PolicyAncestorStatus pattern.
+                    PolicyAncestorStatus describes the policy attachment status for a specific target.
+
+                    PolicyAncestorStatus follows the Gateway API PolicyAncestorStatus pattern to report
+                    per-target attachment status. Each target reference in the spec has a corresponding
+                    ancestor status entry showing whether the policy was successfully attached.
                   properties:
                     ancestorRef:
                       description: AncestorRef identifies the target.

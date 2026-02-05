@@ -74,9 +74,9 @@ type CloudflareAccessPolicyReconciler struct {
 	FeatureGates *features.FeatureGates
 }
 
-// +kubebuilder:rbac:groups=cfgate.io,resources=cloudflareaccespolicies,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cfgate.io,resources=cloudflareaccespolicies/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=cfgate.io,resources=cloudflareaccespolicies/finalizers,verbs=update
+// +kubebuilder:rbac:groups=cfgate.io,resources=cloudflareaccesspolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cfgate.io,resources=cloudflareaccesspolicies/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=cfgate.io,resources=cloudflareaccesspolicies/finalizers,verbs=update
 // +kubebuilder:rbac:groups=cfgate.io,resources=cloudflaretunnels,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways;httproutes;grpcroutes;tcproutes;udproutes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch

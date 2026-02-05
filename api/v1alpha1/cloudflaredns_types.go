@@ -68,8 +68,6 @@ const (
 // ExternalTarget enables CloudflareDNS to manage DNS records that point to external resources
 // rather than Cloudflare tunnels. This supports use cases like pointing to external load
 // balancers, CDN origins, or third-party services.
-//
-// +kubebuilder:validation:XValidation:rule="self.type == 'CNAME' || self.type == 'A' || self.type == 'AAAA'",message="type must be CNAME, A, or AAAA"
 type ExternalTarget struct {
 	// Type is the DNS record type.
 	// +kubebuilder:validation:Required

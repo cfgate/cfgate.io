@@ -47,7 +47,7 @@ rules:
 - apiGroups:
   - cfgate.io
   resources:
-  - cloudflareaccespolicies
+  - cloudflareaccesspolicies
   - cloudflaredns
   - cloudflaretunnels
   verbs:
@@ -61,7 +61,7 @@ rules:
 - apiGroups:
   - cfgate.io
   resources:
-  - cloudflareaccespolicies/finalizers
+  - cloudflareaccesspolicies/finalizers
   - cloudflaredns/finalizers
   - cloudflaretunnels/finalizers
   verbs:
@@ -69,21 +69,13 @@ rules:
 - apiGroups:
   - cfgate.io
   resources:
-  - cloudflareaccespolicies/status
+  - cloudflareaccesspolicies/status
   - cloudflaredns/status
   - cloudflaretunnels/status
   verbs:
   - get
   - patch
   - update
-- apiGroups:
-  - cfgate.io
-  resources:
-  - cloudflareaccesspolicies
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - coordination.k8s.io
   resources:

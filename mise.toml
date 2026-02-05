@@ -42,22 +42,43 @@ run = "go fmt ./... && go vet ./..."
 # Build
 #
 
-[tasks.manifests]
-description = "Generate release manifests to dist/"
-depends = ["codegen"]
-run = """
-mkdir -p dist
-cp config/crd/bases/*.yaml dist/
-kustomize build config/default > dist/install.yaml
-echo "Release manifests written to dist/"
-ls -la dist/
-"""
-
 [tasks.build]
 alias = "b"
 description = "Build manager binary"
 depends = ["codegen"]
-run = "CGO_ENABLED=0 go build -o bin/manager ./cmd/manager"
+run = """
+TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if [ -n "$TAG" ] && [ "$(git describe --tags --exact-match 2>/dev/null)" = "$TAG" ]; then
+  VERSION="${TAG#v}"
+else
+  BASE="${TAG#v}"
+  VERSION="${BASE:-0.0.0}-dev+${COMMIT}"
+fi
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w \
+  -X main.Version=${VERSION} \
+  -X main.Commit=${COMMIT} \
+  -X main.BuildDate=${DATE}" \
+  -o bin/manager ./cmd/manager
+"""
+
+[tasks.manifests]
+alias = "dist"
+description = "Generate release manifests to dist/"
+depends = ["codegen"]
+run = """
+rm -rf dist
+mkdir -p dist/crds
+for f in config/crd/bases/cfgate.io_*.yaml; do
+  name=$(basename "$f" .yaml)
+  cp "$f" "dist/crds/${name#cfgate.io_}.yaml"
+done
+cat dist/crds/*.yaml > dist/crds.yaml
+kustomize build config/default > dist/install.yaml
+echo "Release manifests written to dist/"
+ls -la dist/ dist/crds/
+"""
 
 #
 # Testing
@@ -141,21 +162,59 @@ run = "go run ./cmd/manager"
 [tasks."docker:build"]
 alias = "db"
 description = "Build Docker image"
-run = "docker build -t ${IMG} ."
+run = """
+TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if [ -n "$TAG" ] && [ "$(git describe --tags --exact-match 2>/dev/null)" = "$TAG" ]; then
+  VERSION="${TAG#v}"
+else
+  BASE="${TAG#v}"
+  VERSION="${BASE:-0.0.0}-dev+${COMMIT}"
+fi
+docker build \
+  --build-arg VERSION="${VERSION}" \
+  --build-arg COMMIT="${COMMIT}" \
+  --build-arg BUILD_DATE="${DATE}" \
+  -t ${IMG} .
+"""
 
 [tasks."docker:push"]
 alias = "dp"
 description = "Push Docker image to registry"
 run = """
-docker tag ${IMG} ${REGISTRY}:latest
-docker push ${REGISTRY}:latest
+TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+if [ -n "$TAG" ] && [ "$(git describe --tags --exact-match 2>/dev/null)" = "$TAG" ]; then
+  VERSION="${TAG#v}"
+  docker tag ${IMG} ${REGISTRY}:${VERSION}
+  docker tag ${IMG} ${REGISTRY}:latest
+  docker push ${REGISTRY}:${VERSION}
+  docker push ${REGISTRY}:latest
+else
+  docker tag ${IMG} ${REGISTRY}:dev
+  docker push ${REGISTRY}:dev
+fi
 """
 
 [tasks."docker:buildx"]
 description = "Build multi-arch image (amd64 + arm64)"
 run = """
+TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if [ -n "$TAG" ] && [ "$(git describe --tags --exact-match 2>/dev/null)" = "$TAG" ]; then
+  VERSION="${TAG#v}"
+  TAGS="-t ${REGISTRY}:${VERSION} -t ${REGISTRY}:latest"
+else
+  BASE="${TAG#v}"
+  VERSION="${BASE:-0.0.0}-dev+${COMMIT}"
+  TAGS="-t ${REGISTRY}:dev"
+fi
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ${REGISTRY}:latest \
+  --build-arg VERSION="${VERSION}" \
+  --build-arg COMMIT="${COMMIT}" \
+  --build-arg BUILD_DATE="${DATE}" \
+  ${TAGS} \
   --push .
 """

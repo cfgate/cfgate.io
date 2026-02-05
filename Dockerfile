@@ -3,6 +3,9 @@ FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=0.0.0-dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
 
 WORKDIR /workspace
 
@@ -15,8 +18,12 @@ COPY cmd/ cmd/
 COPY api/ api/
 COPY internal/ internal/
 
-# Build for target platform
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -a -o manager ./cmd/manager
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags "-s -w \
+    -X main.Version=${VERSION} \
+    -X main.Commit=${COMMIT} \
+    -X main.BuildDate=${BUILD_DATE}" \
+    -o manager ./cmd/manager
 
 # Runtime stage
 FROM gcr.io/distroless/static:nonroot

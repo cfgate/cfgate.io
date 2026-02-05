@@ -38,7 +38,22 @@ spec:
       openAPIV3Schema:
         description: |-
           CloudflareDNS is the Schema for the cloudflaredns API.
-          It manages DNS records independently from CloudflareTunnel resources.
+
+          CloudflareDNS manages DNS record synchronization independently from CloudflareTunnel resources.
+          It supports two target modes: tunnel references (for tunnel-based CNAME records) and external
+          targets (for non-tunnel DNS management). DNS records can be sourced from Gateway API routes
+          or explicitly defined.
+
+          CloudflareDNS implements ownership tracking via TXT records (aligned with external-dns patterns)
+          to enable safe multi-cluster deployments and prevent accidental deletion of records created
+          by other installations.
+
+          Status conditions:
+            - Ready: DNS sync is fully operational
+            - CredentialsValid: Cloudflare credentials have been validated
+            - TargetResolved: Tunnel reference or external target has been resolved
+            - ZonesDiscovered: All configured zones have been discovered via API
+            - DNSSynced: DNS records have been synchronized to Cloudflare
         properties:
           apiVersion:
             description: |-
@@ -58,7 +73,12 @@ spec:
           metadata:
             type: object
           spec:
-            description: CloudflareDNSSpec defines the desired state of CloudflareDNS.
+            description: |-
+              CloudflareDNSSpec defines the desired state of a CloudflareDNS resource.
+
+              CloudflareDNSSpec configures DNS record synchronization, including the target
+              (tunnel or external), zones to manage, hostname sources, and ownership tracking.
+              Either tunnelRef or externalTarget must be specified (mutually exclusive).
             properties:
               cleanupPolicy:
                 description: CleanupPolicy defines cleanup behavior for records.
@@ -173,9 +193,6 @@ spec:
                 - type
                 - value
                 type: object
-                x-kubernetes-validations:
-                - message: type must be CNAME, A, or AAAA
-                  rule: self.type == 'CNAME' || self.type == 'A' || self.type == 'AAAA'
               fallbackCredentialsRef:
                 description: |-
                   FallbackCredentialsRef references fallback Cloudflare API credentials.
@@ -252,8 +269,12 @@ spec:
                   explicit:
                     description: Explicit defines explicit hostnames to sync.
                     items:
-                      description: DNSExplicitHostname defines an explicit hostname
-                        to sync.
+                      description: |-
+                        DNSExplicitHostname defines an explicit hostname to sync with optional per-hostname configuration.
+
+                        DNSExplicitHostname provides direct specification of DNS hostnames without depending on
+                        Gateway API route discovery. The Target field supports the {{ .TunnelDomain }} template
+                        variable for dynamic resolution when using tunnelRef.
                       properties:
                         hostname:
                           description: Hostname is the DNS hostname to create.
@@ -345,7 +366,12 @@ spec:
               zones:
                 description: Zones defines the DNS zones to manage.
                 items:
-                  description: DNSZoneConfig defines a DNS zone to manage.
+                  description: |-
+                    DNSZoneConfig defines a DNS zone where records will be managed.
+
+                    DNSZoneConfig identifies a Cloudflare DNS zone either by name (requiring API lookup)
+                    or by explicit zone ID. The optional Proxied field sets the default proxy behavior
+                    for all records in this zone.
                   properties:
                     id:
                       description: ID is the optional explicit zone ID (skips API
@@ -379,7 +405,12 @@ spec:
             - message: cloudflare credentials required when using externalTarget
               rule: has(self.tunnelRef) || has(self.cloudflare)
           status:
-            description: CloudflareDNSStatus defines the observed state of CloudflareDNS.
+            description: |-
+              CloudflareDNSStatus defines the observed state of a CloudflareDNS resource.
+
+              CloudflareDNSStatus captures the synchronization state of all DNS records, including
+              counts of synced, pending, and failed records. The ResolvedTarget field shows the
+              actual CNAME target being used (either from tunnel or external target).
             properties:
               conditions:
                 description: Conditions represent the latest available observations.
@@ -462,8 +493,12 @@ spec:
               records:
                 description: Records contains the status of individual DNS records.
                 items:
-                  description: DNSRecordSyncStatus represents the status of a single
-                    DNS record.
+                  description: |-
+                    DNSRecordSyncStatus represents the synchronization status of a single DNS record.
+
+                    DNSRecordSyncStatus tracks individual DNS record state including the Cloudflare record ID,
+                    current configuration, and sync status. The Status field indicates: Synced (successfully
+                    synchronized), Pending (awaiting sync), or Failed (sync failed, see Error field).
                   properties:
                     error:
                       description: Error contains the error message if status is Failed.

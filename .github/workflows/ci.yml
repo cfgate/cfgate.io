@@ -55,5 +55,21 @@ jobs:
           go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.0
           controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
           controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-      - run: CGO_ENABLED=0 go build -o bin/manager ./cmd/manager
-      - run: docker build -t cfgate:ci .
+      - name: Build binary
+        run: |
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          VERSION="${VERSION#v}-ci+$(git rev-parse --short HEAD)"
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w \
+            -X main.Version=${VERSION} \
+            -X main.Commit=$(git rev-parse --short HEAD) \
+            -X main.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o bin/manager ./cmd/manager
+      - name: Build image
+        run: |
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          VERSION="${VERSION#v}-ci+$(git rev-parse --short HEAD)"
+          docker build \
+            --build-arg VERSION="${VERSION}" \
+            --build-arg COMMIT=$(git rev-parse --short HEAD) \
+            --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            -t cfgate:ci .

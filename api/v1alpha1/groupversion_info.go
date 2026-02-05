@@ -1,5 +1,4 @@
 // Package v1alpha1 contains API Schema definitions for the cfgate v1alpha1 API group.
-// +kubebuilder:object:generate=true
 // +groupName=cfgate.io
 package v1alpha1
 

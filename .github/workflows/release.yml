@@ -34,6 +34,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - id: version
+        run: echo "clean=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -51,6 +54,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.clean }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -61,18 +68,22 @@ jobs:
           controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           sudo mv kustomize /usr/local/bin/
-          # Set image tag to release version (strips 'v' prefix: v0.1.0 -> 0.1.0)
-          cd config/default
-          kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_REF_NAME#v}
+          cd config/manager && kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.clean }}
           cd ../..
-          mkdir -p dist
-          cp config/crd/bases/*.yaml dist/
+          rm -rf dist && mkdir -p dist/crds
+          for f in config/crd/bases/cfgate.io_*.yaml; do
+            name=$(basename "$f" .yaml)
+            cp "$f" "dist/crds/${name#cfgate.io_}.yaml"
+          done
+          cat dist/crds/*.yaml > dist/crds.yaml
           kustomize build config/default > dist/install.yaml
 
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            dist/*.yaml
+            dist/install.yaml
+            dist/crds.yaml
+            dist/crds/*.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -19,11 +19,13 @@ import (
 
 	cfgatev1alpha1 "cfgate.io/cfgate/api/v1alpha1"
 	"cfgate.io/cfgate/internal/controller"
-	// +kubebuilder:scaffold:imports
 )
 
-// Version is set via ldflags at build time (e.g., -ldflags "-X main.Version=v0.1.0").
-var Version = "dev"
+var (
+	Version   = "0.0.0-dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+)
 
 var (
 	scheme   = runtime.NewScheme()
@@ -34,7 +36,6 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(cfgatev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(gwapiv1.Install(scheme))
-	// +kubebuilder:scaffold:scheme
 
 	// Viper configuration
 	viper.SetEnvPrefix("CFGATE")
@@ -75,6 +76,8 @@ func main() {
 	// Log startup configuration. Key-value pairs follow logr conventions.
 	setupLog.Info("starting cfgate controller manager",
 		"version", Version,
+		"commit", Commit,
+		"buildDate", BuildDate,
 		"metricsAddr", metricsAddr,
 		"healthProbeAddr", probeAddr,
 		"leaderElection", enableLeaderElection,
@@ -141,7 +144,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "CloudflareAccessPolicy")
 		os.Exit(1)
 	}
-	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
