@@ -75,7 +75,7 @@ for f in config/crd/bases/cfgate.io_*.yaml; do
   cp "$f" "dist/crds/${name#cfgate.io_}.yaml"
 done
 cat dist/crds/*.yaml > dist/crds.yaml
-kustomize build config/default > dist/install.yaml
+kubectl kustomize config/default > dist/install.yaml
 echo "Release manifests written to dist/"
 ls -la dist/ dist/crds/
 """
@@ -129,23 +129,23 @@ run = "kind get clusters | grep cfgate-test && kubectl --context kind-cfgate-tes
 [tasks."local:install"]
 description = "Install CRDs into current cluster"
 depends = ["codegen"]
-run = "kustomize build config/crd | kubectl apply -f -"
+run = "kubectl apply -k config/crd"
 
 [tasks."local:deploy"]
 description = "Deploy controller to current cluster"
 depends = ["codegen", "docker:build"]
 run = """
 cd config/manager && kustomize edit set image controller=${IMG}
-kustomize build config/default | kubectl apply -f -
+kubectl apply -k config/default
 """
 
 [tasks."local:undeploy"]
 description = "Remove controller from current cluster"
-run = "kustomize build config/default | kubectl delete --ignore-not-found -f -"
+run = "kubectl delete -k config/default --ignore-not-found"
 
 [tasks."local:uninstall"]
 description = "Uninstall CRDs from current cluster"
-run = "kustomize build config/crd | kubectl delete --ignore-not-found -f -"
+run = "kubectl delete -k config/crd --ignore-not-found"
 
 #
 # Controller

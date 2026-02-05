@@ -76,7 +76,7 @@ jobs:
             cp "$f" "dist/crds/${name#cfgate.io_}.yaml"
           done
           cat dist/crds/*.yaml > dist/crds.yaml
-          kustomize build config/default > dist/install.yaml
+          kubectl kustomize config/default > dist/install.yaml
 
       - uses: softprops/action-gh-release@v2
         with:
