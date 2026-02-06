@@ -196,6 +196,18 @@ else
 fi
 """
 
+#
+# Helm
+#
+
+[tasks."helm:lint"]
+description = "Lint Helm chart"
+run = "helm lint charts/cfgate"
+
+[tasks."helm:template"]
+description = "Render Helm chart templates (dry run)"
+run = "helm template cfgate charts/cfgate"
+
 [tasks."docker:buildx"]
 description = "Build multi-arch image (amd64 + arm64)"
 run = """

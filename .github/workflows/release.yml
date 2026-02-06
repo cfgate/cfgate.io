@@ -15,6 +15,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+      attestations: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v6
@@ -47,7 +49,8 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=
 
-      - uses: docker/build-push-action@v6
+      - id: push
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -60,14 +63,22 @@ jobs:
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest container provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 
       - name: Generate manifests
         run: |
           go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.0
           controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
           controller-gen rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-          sudo mv kustomize /usr/local/bin/
+          go install sigs.k8s.io/kustomize/kustomize/v5@latest
           cd config/manager && kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.clean }}
           cd ../..
           rm -rf dist && mkdir -p dist/crds
@@ -78,6 +89,26 @@ jobs:
           cat dist/crds/*.yaml > dist/crds.yaml
           kubectl kustomize config/default > dist/install.yaml
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4.3.0
+        with:
+          version: v4.1.0
+
+      - name: Lint Helm chart
+        run: helm lint charts/cfgate
+
+      - name: Sync Chart.yaml appVersion
+        run: |
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.clean }}\"/" charts/cfgate/Chart.yaml
+
+      - name: Package Helm chart
+        run: helm package charts/cfgate -d dist/
+
+      - name: Push Helm chart to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+          helm push dist/cfgate-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
+
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -85,5 +116,14 @@ jobs:
             dist/install.yaml
             dist/crds.yaml
             dist/crds/*.yaml
+            dist/cfgate-*.tgz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ steps.version.outputs.clean }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.clean }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Digest: ${{ steps.push.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Helm Chart: cfgate-${{ steps.version.outputs.clean }}.tgz" >> $GITHUB_STEP_SUMMARY
