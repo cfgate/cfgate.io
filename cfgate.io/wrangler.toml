@@ -7,11 +7,7 @@ workers_dev = false
 
 [[routes]]
 pattern = "cfgate.io"
-zone_name = "cfgate.io"
-
-[[routes]]
-pattern = "cfgate.io/*"
-zone_name = "cfgate.io"
+custom_domain = true
 
 [observability]
 enabled = true
