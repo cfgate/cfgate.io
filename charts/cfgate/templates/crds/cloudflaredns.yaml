@@ -1,0 +1,361 @@
+{{- if .Values.installCRDs }}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+    helm.sh/resource-policy: keep
+  name: cloudflarednses.cfgate.io
+  labels:
+    {{- include "cfgate.labels" . | nindent 4 }}
+spec:
+  group: cfgate.io
+  names:
+    kind: CloudflareDNS
+    listKind: CloudflareDNSList
+    plural: cloudflarednses
+    shortNames:
+      - cfdns
+      - dns
+    singular: cloudflaredns
+  scope: Namespaced
+  versions:
+    - additionalPrinterColumns:
+        - jsonPath: .status.conditions[?(@.type=='Ready')].status
+          name: Ready
+          type: string
+        - jsonPath: .status.syncedRecords
+          name: Synced
+          type: integer
+        - jsonPath: .status.pendingRecords
+          name: Pending
+          type: integer
+        - jsonPath: .status.failedRecords
+          name: Failed
+          type: integer
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: CloudflareDNS is the Schema for the cloudflaredns API.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: CloudflareDNSSpec defines the desired state of a CloudflareDNS resource.
+              properties:
+                cleanupPolicy:
+                  properties:
+                    deleteOnResourceRemoval:
+                      type: boolean
+                    deleteOnRouteRemoval:
+                      type: boolean
+                    onlyManaged:
+                      type: boolean
+                  type: object
+                cloudflare:
+                  properties:
+                    accountId:
+                      maxLength: 32
+                      type: string
+                    accountName:
+                      maxLength: 255
+                      type: string
+                    secretKeys:
+                      properties:
+                        apiToken:
+                          default: CLOUDFLARE_API_TOKEN
+                          maxLength: 253
+                          type: string
+                      type: object
+                    secretRef:
+                      properties:
+                        name:
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        namespace:
+                          maxLength: 63
+                          type: string
+                      required:
+                        - name
+                      type: object
+                  required:
+                    - secretRef
+                  type: object
+                  x-kubernetes-validations:
+                    - message: either accountId or accountName must be specified
+                      rule: has(self.accountId) || has(self.accountName)
+                defaults:
+                  properties:
+                    proxied:
+                      default: true
+                      type: boolean
+                    ttl:
+                      default: 1
+                      format: int32
+                      maximum: 86400
+                      minimum: 1
+                      type: integer
+                  type: object
+                  x-kubernetes-validations:
+                    - message: TTL must be 1 (auto) or between 60 and 86400 seconds
+                      rule: '!has(self.ttl) || self.ttl == 1 || (self.ttl >= 60 && self.ttl <= 86400)'
+                externalTarget:
+                  properties:
+                    type:
+                      enum:
+                        - CNAME
+                        - A
+                        - AAAA
+                      type: string
+                    value:
+                      maxLength: 255
+                      minLength: 1
+                      type: string
+                  required:
+                    - type
+                    - value
+                  type: object
+                fallbackCredentialsRef:
+                  properties:
+                    name:
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    namespace:
+                      maxLength: 63
+                      type: string
+                  required:
+                    - name
+                  type: object
+                ownership:
+                  properties:
+                    comment:
+                      properties:
+                        enabled:
+                          default: false
+                          type: boolean
+                        template:
+                          default: managed by cfgate
+                          maxLength: 255
+                          type: string
+                      type: object
+                    ownerId:
+                      maxLength: 253
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(/[a-z0-9]([-a-z0-9]*[a-z0-9])?)?$
+                      type: string
+                    txtRecord:
+                      properties:
+                        enabled:
+                          type: boolean
+                        prefix:
+                          default: _cfgate
+                          maxLength: 63
+                          type: string
+                      type: object
+                  type: object
+                policy:
+                  default: sync
+                  enum:
+                    - sync
+                    - upsert-only
+                    - create-only
+                  type: string
+                source:
+                  properties:
+                    explicit:
+                      items:
+                        properties:
+                          hostname:
+                            maxLength: 255
+                            minLength: 1
+                            type: string
+                          proxied:
+                            type: boolean
+                          target:
+                            maxLength: 255
+                            type: string
+                          ttl:
+                            default: 1
+                            format: int32
+                            maximum: 86400
+                            minimum: 1
+                            type: integer
+                        required:
+                          - hostname
+                        type: object
+                        x-kubernetes-validations:
+                          - message: TTL must be 1 (auto) or between 60 and 86400 seconds
+                            rule: '!has(self.ttl) || self.ttl == 1 || (self.ttl >= 60 && self.ttl <= 86400)'
+                      maxItems: 100
+                      type: array
+                    gatewayRoutes:
+                      properties:
+                        annotationFilter:
+                          maxLength: 255
+                          type: string
+                        enabled:
+                          default: true
+                          type: boolean
+                        namespaceSelector:
+                          properties:
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              maxProperties: 10
+                              type: object
+                            matchNames:
+                              items:
+                                type: string
+                              maxItems: 50
+                              type: array
+                          type: object
+                          x-kubernetes-validations:
+                            - message: at least one selector must be specified
+                              rule: has(self.matchLabels) || has(self.matchNames)
+                      type: object
+                  type: object
+                tunnelRef:
+                  properties:
+                    name:
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                    namespace:
+                      maxLength: 63
+                      type: string
+                  required:
+                    - name
+                  type: object
+                zones:
+                  items:
+                    properties:
+                      id:
+                        maxLength: 32
+                        type: string
+                      name:
+                        maxLength: 255
+                        minLength: 1
+                        type: string
+                      proxied:
+                        type: boolean
+                    required:
+                      - name
+                    type: object
+                  maxItems: 10
+                  minItems: 1
+                  type: array
+              required:
+                - zones
+              type: object
+              x-kubernetes-validations:
+                - message: either tunnelRef or externalTarget must be specified
+                  rule: has(self.tunnelRef) || has(self.externalTarget)
+                - message: tunnelRef and externalTarget are mutually exclusive
+                  rule: '!(has(self.tunnelRef) && has(self.externalTarget))'
+                - message: cloudflare credentials required when using externalTarget
+                  rule: has(self.tunnelRef) || has(self.cloudflare)
+            status:
+              properties:
+                conditions:
+                  items:
+                    properties:
+                      lastTransitionTime:
+                        format: date-time
+                        type: string
+                      message:
+                        maxLength: 32768
+                        type: string
+                      observedGeneration:
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      reason:
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        type: string
+                      status:
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                        type: string
+                      type:
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        type: string
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    type: object
+                  type: array
+                  x-kubernetes-list-map-keys:
+                    - type
+                  x-kubernetes-list-type: map
+                failedRecords:
+                  format: int32
+                  type: integer
+                lastSyncTime:
+                  format: date-time
+                  type: string
+                observedGeneration:
+                  format: int64
+                  type: integer
+                pendingRecords:
+                  format: int32
+                  type: integer
+                records:
+                  items:
+                    properties:
+                      error:
+                        type: string
+                      hostname:
+                        type: string
+                      proxied:
+                        type: boolean
+                      recordId:
+                        type: string
+                      status:
+                        type: string
+                      target:
+                        type: string
+                      ttl:
+                        format: int32
+                        type: integer
+                      type:
+                        type: string
+                      zoneId:
+                        type: string
+                    required:
+                      - hostname
+                      - proxied
+                      - status
+                      - target
+                      - type
+                    type: object
+                  maxItems: 1000
+                  type: array
+                resolvedTarget:
+                  type: string
+                syncedRecords:
+                  format: int32
+                  type: integer
+              type: object
+          type: object
+      served: true
+      storage: true
+      subresources:
+        status: {}
+{{- end }}
