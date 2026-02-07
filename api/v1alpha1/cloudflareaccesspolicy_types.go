@@ -64,11 +64,63 @@ type CloudflareSecretRef struct {
 	AccountName string `json:"accountName,omitempty"`
 }
 
+// CORSAllowedMethod is an HTTP method allowed for CORS requests.
+// +kubebuilder:validation:Enum=GET;POST;HEAD;PUT;DELETE;CONNECT;OPTIONS;TRACE;PATCH
+type CORSAllowedMethod string
+
+// CORSHeaders configures Cross-Origin Resource Sharing (CORS) for the Access Application.
+// When set, Cloudflare responds to OPTIONS preflight requests on behalf of the origin.
+// Mutually exclusive with optionsPreflightBypass on the parent AccessApplication.
+type CORSHeaders struct {
+	// AllowAllHeaders allows all HTTP request headers.
+	// +optional
+	AllowAllHeaders bool `json:"allowAllHeaders,omitempty"`
+
+	// AllowAllMethods allows all HTTP request methods.
+	// +optional
+	AllowAllMethods bool `json:"allowAllMethods,omitempty"`
+
+	// AllowAllOrigins allows all origins.
+	// +optional
+	AllowAllOrigins bool `json:"allowAllOrigins,omitempty"`
+
+	// AllowCredentials includes credentials (cookies, authorization headers,
+	// or TLS client certificates) with CORS requests.
+	// +optional
+	AllowCredentials bool `json:"allowCredentials,omitempty"`
+
+	// AllowedHeaders lists specific allowed HTTP request headers.
+	// Ignored when allowAllHeaders is true.
+	// +optional
+	// +kubebuilder:validation:MaxItems=50
+	AllowedHeaders []string `json:"allowedHeaders,omitempty"`
+
+	// AllowedMethods lists specific allowed HTTP request methods.
+	// Ignored when allowAllMethods is true.
+	// +optional
+	// +kubebuilder:validation:MaxItems=9
+	AllowedMethods []CORSAllowedMethod `json:"allowedMethods,omitempty"`
+
+	// AllowedOrigins lists specific allowed origins.
+	// Ignored when allowAllOrigins is true.
+	// +optional
+	// +kubebuilder:validation:MaxItems=50
+	AllowedOrigins []string `json:"allowedOrigins,omitempty"`
+
+	// MaxAge is the maximum number of seconds preflight results can be cached.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=86400
+	MaxAge *int `json:"maxAge,omitempty"`
+}
+
 // AccessApplication defines Cloudflare Access Application configuration.
 //
 // AccessApplication configures the Cloudflare Access Application that protects the target
 // hostnames. The application appears in the Cloudflare dashboard and controls session
 // management, cookie settings, and denial behavior.
+//
+// +kubebuilder:validation:XValidation:rule="!(has(self.corsHeaders) && has(self.optionsPreflightBypass) && self.optionsPreflightBypass)",message="corsHeaders and optionsPreflightBypass are mutually exclusive"
 type AccessApplication struct {
 	// Name is the display name in Cloudflare dashboard.
 	// Defaults to CR name if omitted.
@@ -128,6 +180,66 @@ type AccessApplication struct {
 	// CustomDenyURL redirects to this URL when denied (instead of message).
 	// +optional
 	CustomDenyURL string `json:"customDenyUrl,omitempty"`
+
+	// AllowedIdps restricts which identity providers can authenticate.
+	// Values are Cloudflare Identity Provider UUIDs.
+	// When empty, all IdPs configured in the account are allowed.
+	// +optional
+	// +kubebuilder:validation:MaxItems=25
+	AllowedIdps []string `json:"allowedIdps,omitempty"`
+
+	// AutoRedirectToIdentity auto-redirects to the identity provider
+	// when a single IdP is configured in allowedIdps. Skips the IdP
+	// selection page.
+	// +optional
+	AutoRedirectToIdentity bool `json:"autoRedirectToIdentity,omitempty"`
+
+	// AppLauncherVisible controls whether the application appears in the
+	// Cloudflare App Launcher dashboard. Use pointer to distinguish
+	// explicit false (hidden) from absent (default visible).
+	// +optional
+	// +kubebuilder:default=true
+	AppLauncherVisible *bool `json:"appLauncherVisible,omitempty"`
+
+	// CORSHeaders configures CORS for browser-based APIs behind Access.
+	// When set, Cloudflare responds to OPTIONS preflight on behalf of the origin.
+	// Mutually exclusive with optionsPreflightBypass.
+	// +optional
+	CORSHeaders *CORSHeaders `json:"corsHeaders,omitempty"`
+
+	// OptionsPreflightBypass allows OPTIONS preflight requests to bypass
+	// Access authentication and go directly to the origin. Enabling this
+	// removes all CORS header settings. Mutually exclusive with corsHeaders.
+	// +optional
+	OptionsPreflightBypass bool `json:"optionsPreflightBypass,omitempty"`
+
+	// PathCookieAttribute scopes the Access JWT cookie to the application
+	// path instead of the hostname. When enabled, users must re-authenticate
+	// for different paths on the same hostname.
+	// +optional
+	PathCookieAttribute bool `json:"pathCookieAttribute,omitempty"`
+
+	// ServiceAuth401Redirect returns a 401 status code instead of
+	// redirecting to the Access login page when a request is blocked by a
+	// Service Auth (non_identity) policy. Enable for API consumers.
+	// +optional
+	ServiceAuth401Redirect bool `json:"serviceAuth401Redirect,omitempty"`
+
+	// CustomNonIdentityDenyURL is the URL users are redirected to when
+	// denied by a non-identity (service auth) policy. Separate from
+	// customDenyUrl which handles identity-based denials.
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	CustomNonIdentityDenyURL string `json:"customNonIdentityDenyUrl,omitempty"`
+
+	// ReadServiceTokensFromHeader enables reading service tokens from a
+	// single custom HTTP header instead of the standard CF-Access-Client-Id
+	// and CF-Access-Client-Secret header pair. The value is the header name.
+	// The header value must contain a JSON object with "cf-access-client-id"
+	// and "cf-access-client-secret" keys.
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	ReadServiceTokensFromHeader string `json:"readServiceTokensFromHeader,omitempty"`
 }
 
 // AccessPolicyRule defines an access allow, deny, bypass, or non_identity rule.

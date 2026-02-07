@@ -132,6 +132,20 @@ func (r *CloudflareTunnelReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// ObservedGeneration guard: skip full reconcile when spec unchanged and tunnel healthy.
+	// The controller's RequeueAfter (5m) triggers periodic reconciliation. Without this guard,
+	// every requeue performs ~5 Cloudflare API calls even when nothing changed.
+	// The 30m safety net ensures periodic full reconciliation to catch external state drift.
+	if tunnel.Generation == tunnel.Status.ObservedGeneration &&
+		isTunnelHealthy(&tunnel) &&
+		tunnel.Status.LastSyncTime != nil &&
+		time.Since(tunnel.Status.LastSyncTime.Time) < 30*time.Minute {
+		log.V(1).Info("skipping reconciliation, generation unchanged and tunnel healthy",
+			"generation", tunnel.Generation,
+			"lastSync", tunnel.Status.LastSyncTime.Time)
+		return ctrl.Result{RequeueAfter: requeueAfterSuccess}, nil
+	}
+
 	// 3. Validate credentials
 	if err := r.validateCredentials(ctx, &tunnel); err != nil {
 		log.Error(err, "credentials validation failed")
@@ -762,6 +776,16 @@ func tunnelStatusEqual(a, b *cfgatev1alpha1.CloudflareTunnelStatus) bool {
 	}
 
 	return true
+}
+
+// isTunnelHealthy returns true when the tunnel has a non-empty TunnelID and the
+// Ready condition is True. This is a conservative check: if anything looks wrong,
+// a full reconcile runs.
+func isTunnelHealthy(tunnel *cfgatev1alpha1.CloudflareTunnel) bool {
+	if tunnel.Status.TunnelID == "" {
+		return false
+	}
+	return meta.IsStatusConditionTrue(tunnel.Status.Conditions, ConditionTypeReady)
 }
 
 // getCloudflareClient returns a Cloudflare client for the tunnel, creating one

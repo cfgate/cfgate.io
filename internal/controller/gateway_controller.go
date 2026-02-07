@@ -8,13 +8,16 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	cfgatev1alpha1 "cfgate.io/cfgate/api/v1alpha1"
@@ -116,15 +119,19 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // SetupWithManager sets up the controller with the Manager.
 //
 // Watched resources:
-//   - Gateway (primary resource)
+//   - Gateway (primary resource, with GenerationChangedPredicate)
 //
 // The controller only processes Gateways whose GatewayClass specifies
 // cfgate.io/cloudflare-tunnel-controller as the controller name.
+// GenerationChangedPredicate prevents reconciliation on status-only updates,
+// reducing spurious reconciliations (201 reconciles/4h observed without predicate).
 func (r *GatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	log := mgr.GetLogger().WithName("controller").WithName("gateway")
 	log.Info("registering controller with manager")
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&gwapiv1.Gateway{}).
+		For(&gwapiv1.Gateway{},
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
 		Complete(r)
 }
 
@@ -287,4 +294,91 @@ func (r *GatewayReconciler) setGatewayCondition(gateway *gwapiv1.Gateway, condit
 // that require pointers for optional fields.
 func ptrTo[T any](v T) *T {
 	return &v
+}
+
+// GatewayClassReconciler reconciles GatewayClass resources to set Accepted status.
+//
+// Per Gateway API spec (GEP-1364), controllers MUST set the Accepted condition on
+// GatewayClass resources whose spec.controllerName matches. This reconciler sets
+// Accepted=True for GatewayClasses managed by cfgate, enabling tools like Kiali and
+// kubectl to show the class as ready. Non-matching GatewayClasses are ignored.
+type GatewayClassReconciler struct {
+	client.Client
+	Scheme *runtime.Scheme
+}
+
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gatewayclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gatewayclasses/status,verbs=get;update;patch
+
+// Reconcile handles the reconciliation loop for GatewayClass resources.
+// It sets Accepted=True on GatewayClasses with matching controllerName.
+//
+// The reconciliation proceeds through these phases:
+//  1. Fetch the GatewayClass resource
+//  2. Check if spec.controllerName matches GatewayControllerName
+//  3. If match: set Accepted=True condition (only if not already set)
+//  4. Update status subresource
+//
+// Non-matching GatewayClasses are ignored (another controller owns them).
+// No periodic requeue is needed; watch events are sufficient since GatewayClass
+// changes are rare.
+func (r *GatewayClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := log.FromContext(ctx).WithName("controller").WithName("gatewayclass").
+		WithValues("name", req.Name)
+
+	// 1. Fetch GatewayClass
+	var gc gwapiv1.GatewayClass
+	if err := r.Get(ctx, req.NamespacedName, &gc); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("GatewayClass not found, ignoring")
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("failed to get GatewayClass: %w", err)
+	}
+
+	// 2. Check if this GatewayClass is managed by cfgate
+	if string(gc.Spec.ControllerName) != GatewayControllerName {
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("reconciling GatewayClass")
+
+	// 3. Check if Accepted condition already matches desired state
+	existing := meta.FindStatusCondition(gc.Status.Conditions, string(gwapiv1.GatewayClassConditionStatusAccepted))
+	if existing != nil &&
+		existing.Status == metav1.ConditionTrue &&
+		existing.Reason == string(gwapiv1.GatewayClassReasonAccepted) &&
+		existing.ObservedGeneration == gc.Generation {
+		log.V(1).Info("GatewayClass already accepted, skipping status update")
+		return ctrl.Result{}, nil
+	}
+
+	// 4. Set Accepted=True
+	meta.SetStatusCondition(&gc.Status.Conditions, metav1.Condition{
+		Type:               string(gwapiv1.GatewayClassConditionStatusAccepted),
+		Status:             metav1.ConditionTrue,
+		Reason:             string(gwapiv1.GatewayClassReasonAccepted),
+		Message:            "cfgate accepts this GatewayClass",
+		ObservedGeneration: gc.Generation,
+	})
+
+	if err := r.Status().Update(ctx, &gc); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update GatewayClass status: %w", err)
+	}
+
+	log.Info("GatewayClass accepted")
+	return ctrl.Result{}, nil
+}
+
+// SetupWithManager sets up the GatewayClass controller with the Manager.
+//
+// Watched resources:
+//   - GatewayClass (primary resource, no predicate needed since changes are rare)
+//
+// GatewayClass is cluster-scoped. This is a separate controller from GatewayReconciler
+// because GatewayClass and Gateway have different scoping and reconciliation needs.
+func (r *GatewayClassReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&gwapiv1.GatewayClass{}).
+		Complete(r)
 }

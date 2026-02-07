@@ -85,6 +85,91 @@ spec:
               application:
                 description: Application defines the Access Application settings.
                 properties:
+                  allowedIdps:
+                    description: |-
+                      AllowedIdps restricts which identity providers can authenticate.
+                      Values are Cloudflare Identity Provider UUIDs.
+                      When empty, all IdPs configured in the account are allowed.
+                    items:
+                      type: string
+                    maxItems: 25
+                    type: array
+                  appLauncherVisible:
+                    default: true
+                    description: |-
+                      AppLauncherVisible controls whether the application appears in the
+                      Cloudflare App Launcher dashboard. Use pointer to distinguish
+                      explicit false (hidden) from absent (default visible).
+                    type: boolean
+                  autoRedirectToIdentity:
+                    description: |-
+                      AutoRedirectToIdentity auto-redirects to the identity provider
+                      when a single IdP is configured in allowedIdps. Skips the IdP
+                      selection page.
+                    type: boolean
+                  corsHeaders:
+                    description: |-
+                      CORSHeaders configures CORS for browser-based APIs behind Access.
+                      When set, Cloudflare responds to OPTIONS preflight on behalf of the origin.
+                      Mutually exclusive with optionsPreflightBypass.
+                    properties:
+                      allowAllHeaders:
+                        description: AllowAllHeaders allows all HTTP request headers.
+                        type: boolean
+                      allowAllMethods:
+                        description: AllowAllMethods allows all HTTP request methods.
+                        type: boolean
+                      allowAllOrigins:
+                        description: AllowAllOrigins allows all origins.
+                        type: boolean
+                      allowCredentials:
+                        description: |-
+                          AllowCredentials includes credentials (cookies, authorization headers,
+                          or TLS client certificates) with CORS requests.
+                        type: boolean
+                      allowedHeaders:
+                        description: |-
+                          AllowedHeaders lists specific allowed HTTP request headers.
+                          Ignored when allowAllHeaders is true.
+                        items:
+                          type: string
+                        maxItems: 50
+                        type: array
+                      allowedMethods:
+                        description: |-
+                          AllowedMethods lists specific allowed HTTP request methods.
+                          Ignored when allowAllMethods is true.
+                        items:
+                          description: CORSAllowedMethod is an HTTP method allowed
+                            for CORS requests.
+                          enum:
+                          - GET
+                          - POST
+                          - HEAD
+                          - PUT
+                          - DELETE
+                          - CONNECT
+                          - OPTIONS
+                          - TRACE
+                          - PATCH
+                          type: string
+                        maxItems: 9
+                        type: array
+                      allowedOrigins:
+                        description: |-
+                          AllowedOrigins lists specific allowed origins.
+                          Ignored when allowAllOrigins is true.
+                        items:
+                          type: string
+                        maxItems: 50
+                        type: array
+                      maxAge:
+                        description: MaxAge is the maximum number of seconds preflight
+                          results can be cached.
+                        maximum: 86400
+                        minimum: 0
+                        type: integer
+                    type: object
                   customDenyMessage:
                     description: CustomDenyMessage shown when access is denied.
                     maxLength: 1024
@@ -92,6 +177,13 @@ spec:
                   customDenyUrl:
                     description: CustomDenyURL redirects to this URL when denied (instead
                       of message).
+                    type: string
+                  customNonIdentityDenyUrl:
+                    description: |-
+                      CustomNonIdentityDenyURL is the URL users are redirected to when
+                      denied by a non-identity (service auth) policy. Separate from
+                      customDenyUrl which handles identity-based denials.
+                    maxLength: 1024
                     type: string
                   domain:
                     description: Domain is the protected domain (auto-generated from
@@ -116,9 +208,30 @@ spec:
                       Defaults to CR name if omitted.
                     maxLength: 255
                     type: string
+                  optionsPreflightBypass:
+                    description: |-
+                      OptionsPreflightBypass allows OPTIONS preflight requests to bypass
+                      Access authentication and go directly to the origin. Enabling this
+                      removes all CORS header settings. Mutually exclusive with corsHeaders.
+                    type: boolean
                   path:
                     default: /
                     description: Path restricts protection to specific path prefix.
+                    type: string
+                  pathCookieAttribute:
+                    description: |-
+                      PathCookieAttribute scopes the Access JWT cookie to the application
+                      path instead of the hostname. When enabled, users must re-authenticate
+                      for different paths on the same hostname.
+                    type: boolean
+                  readServiceTokensFromHeader:
+                    description: |-
+                      ReadServiceTokensFromHeader enables reading service tokens from a
+                      single custom HTTP header instead of the standard CF-Access-Client-Id
+                      and CF-Access-Client-Secret header pair. The value is the header name.
+                      The header value must contain a JSON object with "cf-access-client-id"
+                      and "cf-access-client-secret" keys.
+                    maxLength: 256
                     type: string
                   sameSiteCookieAttribute:
                     default: lax
@@ -129,6 +242,12 @@ spec:
                     - lax
                     - none
                     type: string
+                  serviceAuth401Redirect:
+                    description: |-
+                      ServiceAuth401Redirect returns a 401 status code instead of
+                      redirecting to the Access login page when a request is blocked by a
+                      Service Auth (non_identity) policy. Enable for API consumers.
+                    type: boolean
                   sessionDuration:
                     default: 24h
                     description: SessionDuration controls session cookie lifetime.
@@ -150,6 +269,10 @@ spec:
                     - browser_isolation
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: corsHeaders and optionsPreflightBypass are mutually exclusive
+                  rule: '!(has(self.corsHeaders) && has(self.optionsPreflightBypass)
+                    && self.optionsPreflightBypass)'
               cloudflareRef:
                 description: CloudflareRef references Cloudflare credentials (inherits
                   from tunnel if omitted).

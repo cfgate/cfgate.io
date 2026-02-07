@@ -13,9 +13,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 
@@ -48,10 +50,17 @@ type HTTPRouteReconciler struct {
 // The reconciliation proceeds through these phases:
 //  1. Fetch the HTTPRoute resource
 //  2. Validate cfgate.io/* annotations (emit warnings for deprecated ones)
-//  3. Validate each parentRef against cfgate-managed Gateways
-//  4. Resolve backend Service references
-//  5. Resolve cfgate.io/access-policy reference (if present)
-//  6. Update route status with conditions
+//  3. Preserve other controllers' status.parents[] entries
+//  4. Filter and validate only cfgate-managed parentRefs
+//  5. Resolve backend Service references
+//  6. Resolve cfgate.io/access-policy reference (if present)
+//  7. Merge conditions and update route status
+//  8. Emit reconciled event
+//
+// parents[] preservation: Per Gateway API spec, controllers MUST NOT modify
+// entries with non-matching controllerName. This implementation preserves
+// entries from other controllers (e.g., Istio) and only rebuilds cfgate's
+// own entries. Non-cfgate parentRefs are skipped entirely.
 //
 // On error, the controller requeues after 30 seconds. On success, it requeues
 // after 5 minutes for periodic validation.
@@ -80,35 +89,59 @@ func (r *HTTPRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Info("invalid annotation value", "error", errMsg)
 	}
 
-	// 3. Validate each parentRef
-	var parentStatuses []gwapiv1.RouteParentStatus
-	for _, parentRef := range route.Spec.ParentRefs {
-		parentStatus := r.validateParentRef(ctx, &route, parentRef)
-		parentStatuses = append(parentStatuses, parentStatus)
+	// 3. Preserve other controllers' status entries (spec: MUST NOT modify
+	// entries with non-matching controllerName). Start from existing parents,
+	// remove only cfgate's entries, then rebuild cfgate's entries below.
+	var preserved []gwapiv1.RouteParentStatus
+	for _, p := range route.Status.Parents {
+		if string(p.ControllerName) != GatewayControllerName {
+			preserved = append(preserved, p)
+		}
 	}
 
-	// 4. Resolve backend Services
+	// 4. Validate each parentRef — only process cfgate-managed parents.
+	// Per spec: "Implementations of this API can only populate Route status
+	// for the Gateways/parent resources they are responsible for."
+	var cfgateParentStatuses []gwapiv1.RouteParentStatus
+	for _, parentRef := range route.Spec.ParentRefs {
+		isCfgate, err := r.isCfgateParentRef(ctx, &route, parentRef)
+		if err != nil {
+			log.Error(err, "failed to check parentRef ownership")
+			continue
+		}
+		if !isCfgate {
+			log.V(1).Info("skipping non-cfgate parentRef",
+				"parentRef", parentRef.Name,
+			)
+			continue
+		}
+		parentStatus := r.validateParentRef(ctx, &route, parentRef)
+		cfgateParentStatuses = append(cfgateParentStatuses, parentStatus)
+	}
+
+	// 5. Resolve backend Services
 	resolvedRefsCondition := r.resolveBackends(ctx, &route)
 
-	// 5. Resolve access policy reference
+	// 6. Resolve access policy reference
 	accessPolicyCondition := r.resolveAccessPolicy(ctx, &route)
 
-	// 6. Update route status - merge conditions into each parent status
-	for i := range parentStatuses {
-		parentStatuses[i].Conditions = status.MergeConditions(
-			parentStatuses[i].Conditions,
+	// 7. Update route status - merge conditions into each cfgate parent status,
+	// then combine with preserved entries from other controllers.
+	for i := range cfgateParentStatuses {
+		cfgateParentStatuses[i].Conditions = status.MergeConditions(
+			cfgateParentStatuses[i].Conditions,
 			resolvedRefsCondition,
 			accessPolicyCondition,
 		)
 	}
-	route.Status.Parents = parentStatuses
+	route.Status.Parents = append(preserved, cfgateParentStatuses...)
 
 	if err := r.Status().Update(ctx, &route); err != nil {
 		log.Error(err, "failed to update route status")
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// 7. Emit reconciled event
+	// 8. Emit reconciled event
 	r.Recorder.Eventf(&route, nil, corev1.EventTypeNormal, "Reconciled", "Reconcile", "HTTPRoute reconciled successfully")
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
@@ -116,18 +149,25 @@ func (r *HTTPRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // SetupWithManager sets up the controller with the Manager.
 //
 // Watched resources:
-//   - HTTPRoute (primary resource)
-//   - Gateway (triggers reconciliation of routes referencing changed Gateway)
-//   - Service (triggers reconciliation of routes with changed backend)
-//   - CloudflareAccessPolicy (triggers reconciliation of routes referencing policy)
+//   - HTTPRoute (primary resource, with GenerationChangedPredicate)
+//   - Gateway (with CfgateAnnotationOrGenerationPredicate for cfgate.io/* annotation awareness)
+//   - Service (no predicate -- service changes are rare and important)
+//   - CloudflareAccessPolicy (with GenerationChangedPredicate to filter status-only updates)
+//
+// GenerationChangedPredicate on For() prevents reconciliation on status-only updates,
+// reducing spurious reconciliations and status conflicts (137 reconciles/4h + 8 conflicts
+// observed without predicate).
 func (r *HTTPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	log := mgr.GetLogger().WithName("controller").WithName("httproute")
 	log.Info("registering controller with manager")
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&gwapiv1.HTTPRoute{}).
+		For(&gwapiv1.HTTPRoute{},
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
 		Watches(
 			&gwapiv1.Gateway{},
 			handler.EnqueueRequestsFromMapFunc(r.findRoutesForGateway),
+			builder.WithPredicates(CfgateAnnotationOrGenerationPredicate),
 		).
 		Watches(
 			&corev1.Service{},
@@ -136,6 +176,7 @@ func (r *HTTPRouteReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&cfgatev1alpha1.CloudflareAccessPolicy{},
 			handler.EnqueueRequestsFromMapFunc(r.findRoutesForAccessPolicy),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
 		Complete(r)
 }
@@ -243,6 +284,47 @@ func (r *HTTPRouteReconciler) findRoutesForAccessPolicy(ctx context.Context, obj
 	}
 
 	return requests
+}
+
+// isCfgateParentRef checks whether a parentRef points to a Gateway whose
+// GatewayClass is managed by cfgate. Returns (true, nil) for cfgate-managed
+// parents, (false, nil) for non-cfgate parents or missing resources, and
+// (false, err) on unexpected API errors.
+func (r *HTTPRouteReconciler) isCfgateParentRef(
+	ctx context.Context,
+	route *gwapiv1.HTTPRoute,
+	ref gwapiv1.ParentReference,
+) (bool, error) {
+	// Resolve Gateway namespace
+	gwNamespace := route.Namespace
+	if ref.Namespace != nil {
+		gwNamespace = string(*ref.Namespace)
+	}
+
+	// Look up the Gateway
+	var gateway gwapiv1.Gateway
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      string(ref.Name),
+		Namespace: gwNamespace,
+	}, &gateway); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Gateway not found — cannot determine ownership, skip gracefully
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get Gateway %s/%s: %w", gwNamespace, ref.Name, err)
+	}
+
+	// Look up the GatewayClass
+	var gc gwapiv1.GatewayClass
+	if err := r.Get(ctx, types.NamespacedName{Name: string(gateway.Spec.GatewayClassName)}, &gc); err != nil {
+		if apierrors.IsNotFound(err) {
+			// GatewayClass not found — cannot determine ownership, skip gracefully
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get GatewayClass %s: %w", gateway.Spec.GatewayClassName, err)
+	}
+
+	return string(gc.Spec.ControllerName) == GatewayControllerName, nil
 }
 
 // validateParentRef validates that the parent Gateway accepts this route.

@@ -173,6 +173,36 @@ Manages Cloudflare Access applications and policies for zero-trust authenticatio
 | `spec.authentication` | Identity provider configuration |
 | `spec.rules[]` | Access rules (allow, deny, bypass) |
 
+#### Access Application Settings
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `spec.application.allowedIdps` | `[]string` | Restrict identity providers by UUID. Without this, all configured IdPs (including OTP) are shown. |
+| `spec.application.autoRedirectToIdentity` | `bool` | Skip IdP selection page when a single IdP is in `allowedIdps`. |
+| `spec.application.appLauncherVisible` | `*bool` | Show application in Cloudflare App Launcher. Defaults to `true`. |
+| `spec.application.corsHeaders` | object | CORS configuration (see below). Mutually exclusive with `optionsPreflightBypass`. |
+| `spec.application.optionsPreflightBypass` | `bool` | Allow OPTIONS preflight requests to bypass Access auth. Mutually exclusive with `corsHeaders`. |
+| `spec.application.pathCookieAttribute` | `bool` | Scope Access JWT cookie to the application path instead of hostname. |
+| `spec.application.serviceAuth401Redirect` | `bool` | Return HTTP 401 instead of redirect for service auth blocks. |
+| `spec.application.customNonIdentityDenyUrl` | `string` | Redirect URL for non-identity (service token) denials. |
+| `spec.application.readServiceTokensFromHeader` | `string` | Read service token from a single header (JSON with `cf-access-client-id` and `cf-access-client-secret`). |
+
+#### CORS Headers
+
+```yaml
+spec:
+  application:
+    corsHeaders:
+      allowAllHeaders: false
+      allowAllMethods: false
+      allowAllOrigins: false
+      allowCredentials: true
+      allowedHeaders: ["Authorization", "Content-Type"]
+      allowedMethods: ["GET", "POST", "OPTIONS"]
+      allowedOrigins: ["https://app.example.com"]
+      maxAge: 86400
+```
+
 ### HTTPRoute Annotations
 
 Per-route configuration via annotations on Gateway API routes:
@@ -233,6 +263,43 @@ The controller extracts the zone from each hostname using the public suffix list
 | [basic](examples/basic) | Single tunnel + gateway + DNS sync |
 | [multi-service](examples/multi-service) | Multiple services, one tunnel, Access policies |
 | [with-rancher](examples/with-rancher) | Rancher 2.14+ integration |
+
+## Service Mesh Integration
+
+cfgate works alongside service mesh implementations that use Gateway API (Istio, Envoy Gateway, etc.). Each mesh manages its own GatewayClass while cfgate manages `cfgate.io/cloudflare-tunnel-controller`.
+
+### Kiali
+
+[Kiali](https://kiali.io/) only recognizes Istio GatewayClasses by default. If you use Kiali for observability alongside cfgate, add the `cfgate` GatewayClass to Kiali's configuration to suppress KIA1504 validation warnings:
+
+**Kiali CR:**
+
+```yaml
+spec:
+  external_services:
+    istio:
+      gateway_api_classes:
+        - class_name: "istio"
+          name: "Istio"
+        - class_name: "cfgate"
+          name: "cfgate"
+```
+
+**Kiali ConfigMap** (if not using the Kiali Operator):
+
+```yaml
+external_services:
+  istio:
+    gateway_api_classes:
+      - class_name: "istio"
+        name: "Istio"
+      - class_name: "cfgate"
+        name: "cfgate"
+```
+
+> **Note:** Setting `gateway_api_classes` explicitly replaces Kiali's auto-discovery. Include all GatewayClasses you want Kiali to recognize (e.g., `istio`, `istio-remote`, `cfgate`).
+
+See the [Kiali CR Reference](https://kiali.io/docs/configuration/kialis.kiali.io/) for all configuration options.
 
 ## Development
 

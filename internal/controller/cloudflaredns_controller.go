@@ -209,16 +209,17 @@ func (r *CloudflareDNSReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 // SetupWithManager sets up the controller with the Manager.
-// Uses GenerationChangedPredicate to avoid reconciling on status-only updates,
-// which prevents the 1-second reconciliation loop caused by status updates.
 //
 // Watched resources:
-//   - CloudflareDNS (primary resource)
-//   - CloudflareTunnel (via spec.tunnelRef)
-//   - HTTPRoute (for hostname collection when gatewayRoutes.enabled)
-//   - Gateway (for hostname collection via tunnel reference)
+//   - CloudflareDNS (primary, with GenerationChangedPredicate)
+//   - CloudflareTunnel (via spec.tunnelRef, with GenerationChangedPredicate)
+//   - HTTPRoute (for hostname collection, with CfgateAnnotationOrGenerationPredicate)
+//   - Gateway (for tunnel reference, with CfgateAnnotationOrGenerationPredicate)
 //
-// All watches use GenerationChangedPredicate to filter out status-only updates.
+// Uses GenerationChangedPredicate for CRD-only resources to prevent status-only
+// reconciliation loops. Uses CfgateAnnotationOrGenerationPredicate on Gateway/HTTPRoute
+// watchers where cfgate.io/* annotation changes (which don't increment generation on
+// CRDs with status subresource) are meaningful triggers for DNS sync.
 func (r *CloudflareDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	log := mgr.GetLogger().WithName("controller").WithName("dns")
 	log.Info("registering controller with manager")
@@ -234,12 +235,12 @@ func (r *CloudflareDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&gateway.HTTPRoute{},
 			handler.EnqueueRequestsFromMapFunc(r.findAffectedDNSByRoute),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+			builder.WithPredicates(CfgateAnnotationOrGenerationPredicate),
 		).
 		Watches(
 			&gateway.Gateway{},
 			handler.EnqueueRequestsFromMapFunc(r.findAffectedDNSByGateway),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+			builder.WithPredicates(CfgateAnnotationOrGenerationPredicate),
 		).
 		Complete(r)
 }

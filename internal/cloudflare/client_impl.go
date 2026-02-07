@@ -611,24 +611,34 @@ func (c *clientImpl) CreateAccessApplication(ctx context.Context, accountID stri
 		sameSite = "lax"
 	}
 
+	body := zero_trust.AccessApplicationNewParamsBodySelfHostedApplication{
+		Domain:                      cf.F(params.Domain),
+		Type:                        cf.F(appType),
+		Name:                        cf.F(params.Name),
+		SessionDuration:             cf.F(sessionDuration),
+		AllowedIdPs:                 cf.F(params.AllowedIdps),
+		AutoRedirectToIdentity:      cf.F(params.AutoRedirectToIdentity),
+		EnableBindingCookie:         cf.F(params.EnableBindingCookie),
+		HTTPOnlyCookieAttribute:     cf.F(httpOnly),
+		SameSiteCookieAttribute:     cf.F(sameSite),
+		SkipInterstitial:            cf.F(params.SkipInterstitial),
+		LogoURL:                     cf.F(params.LogoURL),
+		AppLauncherVisible:          cf.F(params.AppLauncherVisible),
+		CustomDenyMessage:           cf.F(params.CustomDenyMessage),
+		CustomDenyURL:               cf.F(params.CustomDenyURL),
+		OptionsPreflightBypass:      cf.F(params.OptionsPreflightBypass),
+		PathCookieAttribute:         cf.F(params.PathCookieAttribute),
+		ServiceAuth401Redirect:      cf.F(params.ServiceAuth401Redirect),
+		CustomNonIdentityDenyURL:    cf.F(params.CustomNonIdentityDenyURL),
+		ReadServiceTokensFromHeader: cf.F(params.ReadServiceTokensFromHeader),
+	}
+	if params.CORSHeaders != nil {
+		body.CORSHeaders = cf.F(corsHeadersToSDK(params.CORSHeaders))
+	}
+
 	result, err := c.api.ZeroTrust.Access.Applications.New(ctx, zero_trust.AccessApplicationNewParams{
 		AccountID: cf.F(accountID),
-		Body: zero_trust.AccessApplicationNewParamsBodySelfHostedApplication{
-			Domain:                  cf.F(params.Domain),
-			Type:                    cf.F(appType),
-			Name:                    cf.F(params.Name),
-			SessionDuration:         cf.F(sessionDuration),
-			AllowedIdPs:             cf.F(params.AllowedIdps),
-			AutoRedirectToIdentity:  cf.F(params.AutoRedirectToIdentity),
-			EnableBindingCookie:     cf.F(params.EnableBindingCookie),
-			HTTPOnlyCookieAttribute: cf.F(httpOnly),
-			SameSiteCookieAttribute: cf.F(sameSite),
-			SkipInterstitial:        cf.F(params.SkipInterstitial),
-			LogoURL:                 cf.F(params.LogoURL),
-			AppLauncherVisible:      cf.F(params.AppLauncherVisible),
-			CustomDenyMessage:       cf.F(params.CustomDenyMessage),
-			CustomDenyURL:           cf.F(params.CustomDenyURL),
-		},
+		Body:      body,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create access application: %w", err)
@@ -664,24 +674,34 @@ func (c *clientImpl) UpdateAccessApplication(ctx context.Context, accountID, app
 		sameSite = "lax"
 	}
 
+	body := zero_trust.AccessApplicationUpdateParamsBodySelfHostedApplication{
+		Domain:                      cf.F(params.Domain),
+		Type:                        cf.F(zero_trust.ApplicationTypeSelfHosted),
+		Name:                        cf.F(params.Name),
+		SessionDuration:             cf.F(params.SessionDuration),
+		AllowedIdPs:                 cf.F(params.AllowedIdps),
+		AutoRedirectToIdentity:      cf.F(params.AutoRedirectToIdentity),
+		EnableBindingCookie:         cf.F(params.EnableBindingCookie),
+		HTTPOnlyCookieAttribute:     cf.F(httpOnly),
+		SameSiteCookieAttribute:     cf.F(sameSite),
+		SkipInterstitial:            cf.F(params.SkipInterstitial),
+		LogoURL:                     cf.F(params.LogoURL),
+		AppLauncherVisible:          cf.F(params.AppLauncherVisible),
+		CustomDenyMessage:           cf.F(params.CustomDenyMessage),
+		CustomDenyURL:               cf.F(params.CustomDenyURL),
+		OptionsPreflightBypass:      cf.F(params.OptionsPreflightBypass),
+		PathCookieAttribute:         cf.F(params.PathCookieAttribute),
+		ServiceAuth401Redirect:      cf.F(params.ServiceAuth401Redirect),
+		CustomNonIdentityDenyURL:    cf.F(params.CustomNonIdentityDenyURL),
+		ReadServiceTokensFromHeader: cf.F(params.ReadServiceTokensFromHeader),
+	}
+	if params.CORSHeaders != nil {
+		body.CORSHeaders = cf.F(corsHeadersToSDK(params.CORSHeaders))
+	}
+
 	result, err := c.api.ZeroTrust.Access.Applications.Update(ctx, appID, zero_trust.AccessApplicationUpdateParams{
 		AccountID: cf.F(accountID),
-		Body: zero_trust.AccessApplicationUpdateParamsBodySelfHostedApplication{
-			Domain:                  cf.F(params.Domain),
-			Type:                    cf.F(zero_trust.ApplicationTypeSelfHosted),
-			Name:                    cf.F(params.Name),
-			SessionDuration:         cf.F(params.SessionDuration),
-			AllowedIdPs:             cf.F(params.AllowedIdps),
-			AutoRedirectToIdentity:  cf.F(params.AutoRedirectToIdentity),
-			EnableBindingCookie:     cf.F(params.EnableBindingCookie),
-			HTTPOnlyCookieAttribute: cf.F(httpOnly),
-			SameSiteCookieAttribute: cf.F(sameSite),
-			SkipInterstitial:        cf.F(params.SkipInterstitial),
-			LogoURL:                 cf.F(params.LogoURL),
-			AppLauncherVisible:      cf.F(params.AppLauncherVisible),
-			CustomDenyMessage:       cf.F(params.CustomDenyMessage),
-			CustomDenyURL:           cf.F(params.CustomDenyURL),
-		},
+		Body:      body,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update access application: %w", err)
@@ -1274,6 +1294,60 @@ func (c *clientImpl) UpdateMTLSCertificateSettings(ctx context.Context, accountI
 // SDK response conversion helpers
 // =============================================================================
 
+// corsHeadersToSDK converts internal CORSHeadersParam to SDK CORSHeadersParam.
+func corsHeadersToSDK(h *CORSHeadersParam) zero_trust.CORSHeadersParam {
+	p := zero_trust.CORSHeadersParam{
+		AllowAllHeaders:  cf.F(h.AllowAllHeaders),
+		AllowAllMethods:  cf.F(h.AllowAllMethods),
+		AllowAllOrigins:  cf.F(h.AllowAllOrigins),
+		AllowCredentials: cf.F(h.AllowCredentials),
+		MaxAge:           cf.F(float64(h.MaxAge)),
+	}
+	if len(h.AllowedHeaders) > 0 {
+		headers := make([]zero_trust.AllowedHeadersParam, len(h.AllowedHeaders))
+		for i, hdr := range h.AllowedHeaders {
+			headers[i] = zero_trust.AllowedHeadersParam(hdr)
+		}
+		p.AllowedHeaders = cf.F(headers)
+	}
+	if len(h.AllowedMethods) > 0 {
+		methods := make([]zero_trust.AllowedMethods, len(h.AllowedMethods))
+		for i, m := range h.AllowedMethods {
+			methods[i] = zero_trust.AllowedMethods(m)
+		}
+		p.AllowedMethods = cf.F(methods)
+	}
+	if len(h.AllowedOrigins) > 0 {
+		origins := make([]zero_trust.AllowedOriginsParam, len(h.AllowedOrigins))
+		for i, o := range h.AllowedOrigins {
+			origins[i] = zero_trust.AllowedOriginsParam(o)
+		}
+		p.AllowedOrigins = cf.F(origins)
+	}
+	return p
+}
+
+// corsHeadersFromSDK converts SDK CORSHeaders response to internal CORSHeadersParam.
+func corsHeadersFromSDK(h *zero_trust.CORSHeaders) *CORSHeadersParam {
+	p := &CORSHeadersParam{
+		AllowAllHeaders:  h.AllowAllHeaders,
+		AllowAllMethods:  h.AllowAllMethods,
+		AllowAllOrigins:  h.AllowAllOrigins,
+		AllowCredentials: h.AllowCredentials,
+		MaxAge:           int(h.MaxAge),
+	}
+	for _, hdr := range h.AllowedHeaders {
+		p.AllowedHeaders = append(p.AllowedHeaders, string(hdr))
+	}
+	for _, m := range h.AllowedMethods {
+		p.AllowedMethods = append(p.AllowedMethods, string(m))
+	}
+	for _, o := range h.AllowedOrigins {
+		p.AllowedOrigins = append(p.AllowedOrigins, string(o))
+	}
+	return p
+}
+
 // applicationFromNewResponse converts AccessApplicationNewResponse to AccessApplication.
 func applicationFromNewResponse(resp *zero_trust.AccessApplicationNewResponse) *AccessApplication {
 	if resp == nil {
@@ -1282,21 +1356,26 @@ func applicationFromNewResponse(resp *zero_trust.AccessApplicationNewResponse) *
 
 	// Use flat fields directly from response - no union extraction needed for common fields
 	app := &AccessApplication{
-		ID:                      resp.ID,
-		AUD:                     resp.AUD,
-		Name:                    resp.Name,
-		Domain:                  resp.Domain,
-		Type:                    string(resp.Type),
-		SessionDuration:         resp.SessionDuration,
-		AutoRedirectToIdentity:  resp.AutoRedirectToIdentity,
-		EnableBindingCookie:     resp.EnableBindingCookie,
-		HttpOnlyCookieAttribute: resp.HTTPOnlyCookieAttribute,
-		SameSiteCookieAttribute: resp.SameSiteCookieAttribute,
-		SkipInterstitial:        resp.SkipInterstitial,
-		LogoURL:                 resp.LogoURL,
-		AppLauncherVisible:      resp.AppLauncherVisible,
-		CustomDenyMessage:       resp.CustomDenyMessage,
-		CustomDenyURL:           resp.CustomDenyURL,
+		ID:                          resp.ID,
+		AUD:                         resp.AUD,
+		Name:                        resp.Name,
+		Domain:                      resp.Domain,
+		Type:                        string(resp.Type),
+		SessionDuration:             resp.SessionDuration,
+		AutoRedirectToIdentity:      resp.AutoRedirectToIdentity,
+		EnableBindingCookie:         resp.EnableBindingCookie,
+		HttpOnlyCookieAttribute:     resp.HTTPOnlyCookieAttribute,
+		SameSiteCookieAttribute:     resp.SameSiteCookieAttribute,
+		SkipInterstitial:            resp.SkipInterstitial,
+		LogoURL:                     resp.LogoURL,
+		AppLauncherVisible:          resp.AppLauncherVisible,
+		CustomDenyMessage:           resp.CustomDenyMessage,
+		CustomDenyURL:               resp.CustomDenyURL,
+		OptionsPreflightBypass:      resp.OptionsPreflightBypass,
+		PathCookieAttribute:         resp.PathCookieAttribute,
+		ServiceAuth401Redirect:      resp.ServiceAuth401Redirect,
+		CustomNonIdentityDenyURL:    resp.CustomNonIdentityDenyURL,
+		ReadServiceTokensFromHeader: resp.ReadServiceTokensFromHeader,
 		// CreatedAt and UpdatedAt not available in application responses
 	}
 
@@ -1309,6 +1388,14 @@ func applicationFromNewResponse(resp *zero_trust.AccessApplicationNewResponse) *
 		}
 	}
 
+	// Parse CORSHeaders if any sub-field is non-zero
+	if resp.CORSHeaders.AllowAllHeaders || resp.CORSHeaders.AllowAllMethods ||
+		resp.CORSHeaders.AllowAllOrigins || resp.CORSHeaders.AllowCredentials ||
+		len(resp.CORSHeaders.AllowedHeaders) > 0 || len(resp.CORSHeaders.AllowedMethods) > 0 ||
+		len(resp.CORSHeaders.AllowedOrigins) > 0 || resp.CORSHeaders.MaxAge > 0 {
+		app.CORSHeaders = corsHeadersFromSDK(&resp.CORSHeaders)
+	}
+
 	return app
 }
 
@@ -1319,21 +1406,26 @@ func applicationFromGetResponse(resp *zero_trust.AccessApplicationGetResponse) *
 	}
 
 	app := &AccessApplication{
-		ID:                      resp.ID,
-		AUD:                     resp.AUD,
-		Name:                    resp.Name,
-		Domain:                  resp.Domain,
-		Type:                    string(resp.Type),
-		SessionDuration:         resp.SessionDuration,
-		AutoRedirectToIdentity:  resp.AutoRedirectToIdentity,
-		EnableBindingCookie:     resp.EnableBindingCookie,
-		HttpOnlyCookieAttribute: resp.HTTPOnlyCookieAttribute,
-		SameSiteCookieAttribute: resp.SameSiteCookieAttribute,
-		SkipInterstitial:        resp.SkipInterstitial,
-		LogoURL:                 resp.LogoURL,
-		AppLauncherVisible:      resp.AppLauncherVisible,
-		CustomDenyMessage:       resp.CustomDenyMessage,
-		CustomDenyURL:           resp.CustomDenyURL,
+		ID:                          resp.ID,
+		AUD:                         resp.AUD,
+		Name:                        resp.Name,
+		Domain:                      resp.Domain,
+		Type:                        string(resp.Type),
+		SessionDuration:             resp.SessionDuration,
+		AutoRedirectToIdentity:      resp.AutoRedirectToIdentity,
+		EnableBindingCookie:         resp.EnableBindingCookie,
+		HttpOnlyCookieAttribute:     resp.HTTPOnlyCookieAttribute,
+		SameSiteCookieAttribute:     resp.SameSiteCookieAttribute,
+		SkipInterstitial:            resp.SkipInterstitial,
+		LogoURL:                     resp.LogoURL,
+		AppLauncherVisible:          resp.AppLauncherVisible,
+		CustomDenyMessage:           resp.CustomDenyMessage,
+		CustomDenyURL:               resp.CustomDenyURL,
+		OptionsPreflightBypass:      resp.OptionsPreflightBypass,
+		PathCookieAttribute:         resp.PathCookieAttribute,
+		ServiceAuth401Redirect:      resp.ServiceAuth401Redirect,
+		CustomNonIdentityDenyURL:    resp.CustomNonIdentityDenyURL,
+		ReadServiceTokensFromHeader: resp.ReadServiceTokensFromHeader,
 	}
 
 	// Handle AllowedIdPs which is an interface{} in the response
@@ -1343,6 +1435,14 @@ func applicationFromGetResponse(resp *zero_trust.AccessApplicationGetResponse) *
 				app.AllowedIdps = append(app.AllowedIdps, s)
 			}
 		}
+	}
+
+	// Parse CORSHeaders if any sub-field is non-zero
+	if resp.CORSHeaders.AllowAllHeaders || resp.CORSHeaders.AllowAllMethods ||
+		resp.CORSHeaders.AllowAllOrigins || resp.CORSHeaders.AllowCredentials ||
+		len(resp.CORSHeaders.AllowedHeaders) > 0 || len(resp.CORSHeaders.AllowedMethods) > 0 ||
+		len(resp.CORSHeaders.AllowedOrigins) > 0 || resp.CORSHeaders.MaxAge > 0 {
+		app.CORSHeaders = corsHeadersFromSDK(&resp.CORSHeaders)
 	}
 
 	return app
@@ -1355,21 +1455,26 @@ func applicationFromUpdateResponse(resp *zero_trust.AccessApplicationUpdateRespo
 	}
 
 	app := &AccessApplication{
-		ID:                      resp.ID,
-		AUD:                     resp.AUD,
-		Name:                    resp.Name,
-		Domain:                  resp.Domain,
-		Type:                    string(resp.Type),
-		SessionDuration:         resp.SessionDuration,
-		AutoRedirectToIdentity:  resp.AutoRedirectToIdentity,
-		EnableBindingCookie:     resp.EnableBindingCookie,
-		HttpOnlyCookieAttribute: resp.HTTPOnlyCookieAttribute,
-		SameSiteCookieAttribute: resp.SameSiteCookieAttribute,
-		SkipInterstitial:        resp.SkipInterstitial,
-		LogoURL:                 resp.LogoURL,
-		AppLauncherVisible:      resp.AppLauncherVisible,
-		CustomDenyMessage:       resp.CustomDenyMessage,
-		CustomDenyURL:           resp.CustomDenyURL,
+		ID:                          resp.ID,
+		AUD:                         resp.AUD,
+		Name:                        resp.Name,
+		Domain:                      resp.Domain,
+		Type:                        string(resp.Type),
+		SessionDuration:             resp.SessionDuration,
+		AutoRedirectToIdentity:      resp.AutoRedirectToIdentity,
+		EnableBindingCookie:         resp.EnableBindingCookie,
+		HttpOnlyCookieAttribute:     resp.HTTPOnlyCookieAttribute,
+		SameSiteCookieAttribute:     resp.SameSiteCookieAttribute,
+		SkipInterstitial:            resp.SkipInterstitial,
+		LogoURL:                     resp.LogoURL,
+		AppLauncherVisible:          resp.AppLauncherVisible,
+		CustomDenyMessage:           resp.CustomDenyMessage,
+		CustomDenyURL:               resp.CustomDenyURL,
+		OptionsPreflightBypass:      resp.OptionsPreflightBypass,
+		PathCookieAttribute:         resp.PathCookieAttribute,
+		ServiceAuth401Redirect:      resp.ServiceAuth401Redirect,
+		CustomNonIdentityDenyURL:    resp.CustomNonIdentityDenyURL,
+		ReadServiceTokensFromHeader: resp.ReadServiceTokensFromHeader,
 	}
 
 	// Handle AllowedIdPs which is an interface{} in the response
@@ -1379,6 +1484,14 @@ func applicationFromUpdateResponse(resp *zero_trust.AccessApplicationUpdateRespo
 				app.AllowedIdps = append(app.AllowedIdps, s)
 			}
 		}
+	}
+
+	// Parse CORSHeaders if any sub-field is non-zero
+	if resp.CORSHeaders.AllowAllHeaders || resp.CORSHeaders.AllowAllMethods ||
+		resp.CORSHeaders.AllowAllOrigins || resp.CORSHeaders.AllowCredentials ||
+		len(resp.CORSHeaders.AllowedHeaders) > 0 || len(resp.CORSHeaders.AllowedMethods) > 0 ||
+		len(resp.CORSHeaders.AllowedOrigins) > 0 || resp.CORSHeaders.MaxAge > 0 {
+		app.CORSHeaders = corsHeadersFromSDK(&resp.CORSHeaders)
 	}
 
 	return app
@@ -1391,21 +1504,26 @@ func applicationFromListResponse(resp *zero_trust.AccessApplicationListResponse)
 	}
 
 	app := &AccessApplication{
-		ID:                      resp.ID,
-		AUD:                     resp.AUD,
-		Name:                    resp.Name,
-		Domain:                  resp.Domain,
-		Type:                    string(resp.Type),
-		SessionDuration:         resp.SessionDuration,
-		AutoRedirectToIdentity:  resp.AutoRedirectToIdentity,
-		EnableBindingCookie:     resp.EnableBindingCookie,
-		HttpOnlyCookieAttribute: resp.HTTPOnlyCookieAttribute,
-		SameSiteCookieAttribute: resp.SameSiteCookieAttribute,
-		SkipInterstitial:        resp.SkipInterstitial,
-		LogoURL:                 resp.LogoURL,
-		AppLauncherVisible:      resp.AppLauncherVisible,
-		CustomDenyMessage:       resp.CustomDenyMessage,
-		CustomDenyURL:           resp.CustomDenyURL,
+		ID:                          resp.ID,
+		AUD:                         resp.AUD,
+		Name:                        resp.Name,
+		Domain:                      resp.Domain,
+		Type:                        string(resp.Type),
+		SessionDuration:             resp.SessionDuration,
+		AutoRedirectToIdentity:      resp.AutoRedirectToIdentity,
+		EnableBindingCookie:         resp.EnableBindingCookie,
+		HttpOnlyCookieAttribute:     resp.HTTPOnlyCookieAttribute,
+		SameSiteCookieAttribute:     resp.SameSiteCookieAttribute,
+		SkipInterstitial:            resp.SkipInterstitial,
+		LogoURL:                     resp.LogoURL,
+		AppLauncherVisible:          resp.AppLauncherVisible,
+		CustomDenyMessage:           resp.CustomDenyMessage,
+		CustomDenyURL:               resp.CustomDenyURL,
+		OptionsPreflightBypass:      resp.OptionsPreflightBypass,
+		PathCookieAttribute:         resp.PathCookieAttribute,
+		ServiceAuth401Redirect:      resp.ServiceAuth401Redirect,
+		CustomNonIdentityDenyURL:    resp.CustomNonIdentityDenyURL,
+		ReadServiceTokensFromHeader: resp.ReadServiceTokensFromHeader,
 	}
 
 	// Handle AllowedIdPs which is an interface{} in the response
@@ -1415,6 +1533,14 @@ func applicationFromListResponse(resp *zero_trust.AccessApplicationListResponse)
 				app.AllowedIdps = append(app.AllowedIdps, s)
 			}
 		}
+	}
+
+	// Parse CORSHeaders if any sub-field is non-zero
+	if resp.CORSHeaders.AllowAllHeaders || resp.CORSHeaders.AllowAllMethods ||
+		resp.CORSHeaders.AllowAllOrigins || resp.CORSHeaders.AllowCredentials ||
+		len(resp.CORSHeaders.AllowedHeaders) > 0 || len(resp.CORSHeaders.AllowedMethods) > 0 ||
+		len(resp.CORSHeaders.AllowedOrigins) > 0 || resp.CORSHeaders.MaxAge > 0 {
+		app.CORSHeaders = corsHeadersFromSDK(&resp.CORSHeaders)
 	}
 
 	return app

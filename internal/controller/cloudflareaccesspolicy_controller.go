@@ -593,6 +593,39 @@ func (r *CloudflareAccessPolicyReconciler) ensureApplication(
 	httpOnly := policy.Spec.Application.HttpOnlyCookieAttribute
 	params.HttpOnlyCookieAttribute = &httpOnly
 
+	// P0 fields (already in internal SDK, CRD-only wiring)
+	params.AllowedIdps = policy.Spec.Application.AllowedIdps
+	params.AutoRedirectToIdentity = policy.Spec.Application.AutoRedirectToIdentity
+	if policy.Spec.Application.AppLauncherVisible != nil {
+		params.AppLauncherVisible = *policy.Spec.Application.AppLauncherVisible
+	}
+
+	// P1 fields
+	params.OptionsPreflightBypass = policy.Spec.Application.OptionsPreflightBypass
+	params.PathCookieAttribute = policy.Spec.Application.PathCookieAttribute
+	params.ServiceAuth401Redirect = policy.Spec.Application.ServiceAuth401Redirect
+	params.CustomNonIdentityDenyURL = policy.Spec.Application.CustomNonIdentityDenyURL
+	params.ReadServiceTokensFromHeader = policy.Spec.Application.ReadServiceTokensFromHeader
+
+	// CORSHeaders (nested, conditional)
+	if policy.Spec.Application.CORSHeaders != nil {
+		cors := policy.Spec.Application.CORSHeaders
+		params.CORSHeaders = &cloudflare.CORSHeadersParam{
+			AllowAllHeaders:  cors.AllowAllHeaders,
+			AllowAllMethods:  cors.AllowAllMethods,
+			AllowAllOrigins:  cors.AllowAllOrigins,
+			AllowCredentials: cors.AllowCredentials,
+		}
+		params.CORSHeaders.AllowedHeaders = append(params.CORSHeaders.AllowedHeaders, cors.AllowedHeaders...)
+		for _, m := range cors.AllowedMethods {
+			params.CORSHeaders.AllowedMethods = append(params.CORSHeaders.AllowedMethods, string(m))
+		}
+		params.CORSHeaders.AllowedOrigins = append(params.CORSHeaders.AllowedOrigins, cors.AllowedOrigins...)
+		if cors.MaxAge != nil {
+			params.CORSHeaders.MaxAge = *cors.MaxAge
+		}
+	}
+
 	if params.Name == "" {
 		params.Name = policy.Name
 	}

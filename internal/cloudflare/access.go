@@ -3,6 +3,7 @@ package cloudflare
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -85,11 +86,38 @@ type AccessApplication struct {
 	// CustomNonIdentityDenyURL is the denial URL for non-identity requests.
 	CustomNonIdentityDenyURL string
 
+	// CORSHeaders is the CORS configuration (nil if not set).
+	CORSHeaders *CORSHeadersParam
+
+	// OptionsPreflightBypass bypasses Access for OPTIONS preflight.
+	OptionsPreflightBypass bool
+
+	// PathCookieAttribute scopes JWT cookie to application path.
+	PathCookieAttribute bool
+
+	// ServiceAuth401Redirect returns 401 instead of redirect for service auth.
+	ServiceAuth401Redirect bool
+
+	// ReadServiceTokensFromHeader reads service tokens from a single header.
+	ReadServiceTokensFromHeader string
+
 	// CreatedAt is the creation timestamp.
 	CreatedAt time.Time
 
 	// UpdatedAt is the last update timestamp.
 	UpdatedAt time.Time
+}
+
+// CORSHeadersParam represents CORS configuration for an Access Application.
+type CORSHeadersParam struct {
+	AllowAllHeaders  bool
+	AllowAllMethods  bool
+	AllowAllOrigins  bool
+	AllowCredentials bool
+	AllowedHeaders   []string
+	AllowedMethods   []string
+	AllowedOrigins   []string
+	MaxAge           int
 }
 
 // CreateApplicationParams contains parameters for creating an application.
@@ -135,6 +163,24 @@ type CreateApplicationParams struct {
 
 	// CustomDenyURL is the denial redirect.
 	CustomDenyURL string
+
+	// CORSHeaders configures CORS for the application.
+	CORSHeaders *CORSHeadersParam
+
+	// OptionsPreflightBypass bypasses Access for OPTIONS preflight.
+	OptionsPreflightBypass bool
+
+	// PathCookieAttribute scopes JWT cookie to application path.
+	PathCookieAttribute bool
+
+	// ServiceAuth401Redirect returns 401 instead of redirect for service auth.
+	ServiceAuth401Redirect bool
+
+	// CustomNonIdentityDenyURL is the denial URL for non-identity requests.
+	CustomNonIdentityDenyURL string
+
+	// ReadServiceTokensFromHeader reads service tokens from a single header.
+	ReadServiceTokensFromHeader string
 }
 
 // UpdateApplicationParams contains parameters for updating an application.
@@ -177,6 +223,24 @@ type UpdateApplicationParams struct {
 
 	// CustomDenyURL is the denial redirect.
 	CustomDenyURL string
+
+	// CORSHeaders configures CORS for the application.
+	CORSHeaders *CORSHeadersParam
+
+	// OptionsPreflightBypass bypasses Access for OPTIONS preflight.
+	OptionsPreflightBypass bool
+
+	// PathCookieAttribute scopes JWT cookie to application path.
+	PathCookieAttribute bool
+
+	// ServiceAuth401Redirect returns 401 instead of redirect for service auth.
+	ServiceAuth401Redirect bool
+
+	// CustomNonIdentityDenyURL is the denial URL for non-identity requests.
+	CustomNonIdentityDenyURL string
+
+	// ReadServiceTokensFromHeader reads service tokens from a single header.
+	ReadServiceTokensFromHeader string
 }
 
 // AccessPolicy represents a Cloudflare Access Policy.
@@ -629,7 +693,7 @@ func (s *AccessService) SyncPolicies(ctx context.Context, accountID, appID strin
 	for name, params := range desiredByName {
 		if existingPolicy, found := existingByName[name]; found {
 			// Update if different
-			if !policiesEqual(existingPolicy, &params) {
+			if !accessPolicyEqual(existingPolicy, &params) {
 				toUpdate++
 				s.log.V(1).Info("policy operation",
 					"applicationId", appID,
@@ -642,6 +706,10 @@ func (s *AccessService) SyncPolicies(ctx context.Context, accountID, appID strin
 				}
 				resultIDs = append(resultIDs, updated.ID)
 			} else {
+				s.log.V(1).Info("skipping policy update, content unchanged",
+					"applicationId", appID,
+					"policyName", name,
+				)
 				resultIDs = append(resultIDs, existingPolicy.ID)
 			}
 		} else {
@@ -670,9 +738,10 @@ func (s *AccessService) SyncPolicies(ctx context.Context, accountID, appID strin
 	return resultIDs, nil
 }
 
-// policiesEqual checks if an existing policy matches desired params.
-// Uses simplified comparison by rule count rather than deep equality.
-func policiesEqual(existing *AccessPolicy, desired *CreatePolicyParams) bool {
+// accessPolicyEqual compares desired vs existing access policy content.
+// Returns true if no update is needed. Uses deep comparison for rule slices
+// to avoid unnecessary Cloudflare API calls when policy content is unchanged.
+func accessPolicyEqual(existing *AccessPolicy, desired *CreatePolicyParams) bool {
 	if existing.Name != desired.Name {
 		return false
 	}
@@ -682,11 +751,31 @@ func policiesEqual(existing *AccessPolicy, desired *CreatePolicyParams) bool {
 	if existing.Precedence != desired.Precedence {
 		return false
 	}
-	// For full equality checking, we would need to compare rules deeply
-	// For now, we use a simplified check
-	return len(existing.Include) == len(desired.Include) &&
-		len(existing.Exclude) == len(desired.Exclude) &&
-		len(existing.Require) == len(desired.Require)
+	if existing.SessionDuration != desired.SessionDuration {
+		return false
+	}
+	if existing.PurposeJustificationRequired != desired.PurposeJustificationRequired {
+		return false
+	}
+	if existing.PurposeJustificationPrompt != desired.PurposeJustificationPrompt {
+		return false
+	}
+	if existing.ApprovalRequired != desired.ApprovalRequired {
+		return false
+	}
+	if !reflect.DeepEqual(existing.Include, desired.Include) {
+		return false
+	}
+	if !reflect.DeepEqual(existing.Exclude, desired.Exclude) {
+		return false
+	}
+	if !reflect.DeepEqual(existing.Require, desired.Require) {
+		return false
+	}
+	if !reflect.DeepEqual(existing.ApprovalGroups, desired.ApprovalGroups) {
+		return false
+	}
+	return true
 }
 
 // EnsureServiceToken ensures a service token exists with the given configuration.
