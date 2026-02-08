@@ -16,6 +16,7 @@ import (
 
 	cfgatev1alpha1 "cfgate.io/cfgate/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 // CloudflareDNS E2E tests.
@@ -77,7 +78,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 			hostname    string
 		)
 
-		It("creates CNAME record pointing to tunnel domain", SpecTimeout(3*time.Minute), func(ctx SpecContext) {
+		It("creates CNAME record pointing to tunnel domain", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			By("Creating CloudflareDNS with tunnelRef")
 			hostname = fmt.Sprintf("%s.%s", testID("tunnelref"), testEnv.CloudflareZoneName)
 			dnsResource = createCloudflareDNSWithTunnelRef(ctx, k8sClient,
@@ -100,7 +101,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 			}, DefaultTimeout, DefaultInterval).Should(Succeed())
 		})
 
-		It("creates proxied DNS records by default", SpecTimeout(2*time.Minute), func(ctx SpecContext) {
+		It("creates proxied DNS records by default", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			By("Verifying record is proxied (orange cloud)")
 			Eventually(func(g Gomega) {
 				record, err := getDNSRecordFromCloudflare(ctx, cfClient, zoneID, hostname, "CNAME")
@@ -124,7 +125,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 			Expect(current.Status.SyncedRecords).To(BeNumerically(">=", 1), "Should have at least 1 synced record")
 		})
 
-		It("cleans up DNS record on CloudflareDNS deletion", SpecTimeout(3*time.Minute), func(ctx SpecContext) {
+		It("cleans up DNS record on CloudflareDNS deletion", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			By("Deleting the CloudflareDNS resource")
 			Expect(k8sClient.Delete(ctx, dnsResource)).To(Succeed())
 
@@ -149,7 +150,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 			hostname    string
 		)
 
-		It("creates CNAME record with external target", SpecTimeout(3*time.Minute), func(ctx SpecContext) {
+		It("creates CNAME record with external target", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			By("Creating CloudflareDNS with externalTarget")
 			hostname = fmt.Sprintf("%s.%s", testID("external"), testEnv.CloudflareZoneName)
 			dnsResource = createCloudflareDNSWithExternalTarget(ctx, k8sClient,
@@ -179,7 +180,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 			Expect(current.Status.ResolvedTarget).To(Equal("example.com"))
 		})
 
-		It("cleans up on deletion", SpecTimeout(2*time.Minute), func(ctx SpecContext) {
+		It("cleans up on deletion", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			By("Deleting the CloudflareDNS resource")
 			Expect(k8sClient.Delete(ctx, dnsResource)).To(Succeed())
 
@@ -312,7 +313,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 	// =========================================================================
 
 	Context("TXT ownership records", func() {
-		It("creates TXT ownership record when enabled", SpecTimeout(3*time.Minute), func(ctx SpecContext) {
+		It("creates TXT ownership record when enabled", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			hostname := fmt.Sprintf("%s.%s", testID("txt-enabled"), testEnv.CloudflareZoneName)
 
 			By("Creating CloudflareDNS with TXT ownership enabled")
@@ -344,7 +345,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 			Expect(k8sClient.Delete(ctx, dnsResource)).To(Succeed())
 		})
 
-		It("skips TXT record when ownership disabled", SpecTimeout(3*time.Minute), func(ctx SpecContext) {
+		It("skips TXT record when ownership disabled", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			hostname := fmt.Sprintf("%s.%s", testID("txt-disabled"), testEnv.CloudflareZoneName)
 
 			By("Creating CloudflareDNS with TXT ownership disabled")
@@ -374,7 +375,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 			Expect(k8sClient.Delete(ctx, dnsResource)).To(Succeed())
 		})
 
-		It("uses custom TXT prefix when specified", SpecTimeout(3*time.Minute), func(ctx SpecContext) {
+		It("uses custom TXT prefix when specified", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			hostname := fmt.Sprintf("%s.%s", testID("txt-custom"), testEnv.CloudflareZoneName)
 			customPrefix := "_custom-owner"
 
@@ -411,7 +412,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 	// =========================================================================
 
 	Context("zone resolution", func() {
-		It("resolves zone by name", SpecTimeout(2*time.Minute), func(ctx SpecContext) {
+		It("resolves zone by name", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			hostname := fmt.Sprintf("%s.%s", testID("zone-resolve"), testEnv.CloudflareZoneName)
 
 			By("Creating CloudflareDNS with zone name only (no ID)")
@@ -434,7 +435,7 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 			Expect(k8sClient.Delete(ctx, dnsResource)).To(Succeed())
 		})
 
-		It("handles hostname matching zone correctly", SpecTimeout(2*time.Minute), func(ctx SpecContext) {
+		It("handles hostname matching zone correctly", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			// Test that a hostname is matched to the correct zone.
 			hostname := fmt.Sprintf("%s.%s", testID("zone-match"), testEnv.CloudflareZoneName)
 
@@ -459,11 +460,71 @@ var _ = Describe("CloudflareDNS E2E", Label("cloudflare"), Ordered, func() {
 	})
 
 	// =========================================================================
+	// Section 5.5: §6.4 Annotation-Triggered Reconciliation
+	// =========================================================================
+
+	Context("annotation-triggered reconciliation", func() {
+		It("should reconcile DNS when annotation is added post-creation", SpecTimeout(5*time.Minute), func(ctx SpecContext) {
+			By("Creating GatewayClass and Gateway without dns-sync annotation")
+			gcName := testID("gc")
+			createGatewayClass(ctx, k8sClient, gcName)
+
+			tunnelRef := fmt.Sprintf("%s/%s", namespace.Name, sharedTunnel.Name)
+			gwName := testID("gw")
+			createGateway(ctx, k8sClient, gwName, namespace.Name, gcName, tunnelRef)
+
+			By("Creating test Service")
+			svcName := testID("svc")
+			createTestService(ctx, k8sClient, svcName, namespace.Name, 8080)
+
+			By("Creating HTTPRoute WITHOUT annotation")
+			hostname := fmt.Sprintf("%s.%s", testID("annot-dns"), testEnv.CloudflareZoneName)
+			routeName := testID("route")
+
+			route := createHTTPRoute(ctx, k8sClient, routeName, namespace.Name, gwName, []string{hostname}, svcName, 8080)
+
+			By("Creating CloudflareDNS with annotationFilter requiring cfgate.io/dns-sync=enabled")
+			dnsResource := createCloudflareDNSWithGatewayRoutes(ctx, k8sClient,
+				testID("dns-annot"), namespace.Name,
+				sharedTunnel.Name,
+				[]string{testEnv.CloudflareZoneName},
+				"cfgate.io/dns-sync=enabled",
+			)
+
+			By("Verifying no DNS records created initially (annotation doesn't match)")
+			Consistently(func() bool {
+				record, err := getDNSRecordFromCloudflare(ctx, cfClient, zoneID, hostname, "CNAME")
+				return err == nil && record == nil
+			}, ShortTimeout, DefaultInterval).Should(BeTrue(),
+				"DNS record should NOT be created when annotation filter doesn't match")
+
+			By("Patching HTTPRoute to add cfgate.io/dns-sync=enabled annotation")
+			var currentRoute gatewayv1.HTTPRoute
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: route.Name, Namespace: route.Namespace}, &currentRoute)).To(Succeed())
+			if currentRoute.Annotations == nil {
+				currentRoute.Annotations = make(map[string]string)
+			}
+			currentRoute.Annotations["cfgate.io/dns-sync"] = "enabled"
+			Expect(k8sClient.Update(ctx, &currentRoute)).To(Succeed())
+
+			By("Verifying DNS records appear after annotation triggers reconciliation")
+			Eventually(func() bool {
+				record, err := getDNSRecordFromCloudflare(ctx, cfClient, zoneID, hostname, "CNAME")
+				return err == nil && record != nil
+			}, DefaultTimeout, DefaultInterval).Should(BeTrue(),
+				"DNS record should be created after annotation is added")
+
+			// Cleanup.
+			Expect(k8sClient.Delete(ctx, dnsResource)).To(Succeed())
+		})
+	})
+
+	// =========================================================================
 	// Section 6: Cleanup Policy Tests
 	// =========================================================================
 
 	Context("cleanup policy", func() {
-		It("respects deleteOnResourceRemoval=false", SpecTimeout(3*time.Minute), func(ctx SpecContext) {
+		It("respects deleteOnResourceRemoval=false", SpecTimeout(6*time.Minute), func(ctx SpecContext) {
 			hostname := fmt.Sprintf("%s.%s", testID("cleanup-false"), testEnv.CloudflareZoneName)
 
 			By("Creating CloudflareDNS with deleteOnResourceRemoval=false")

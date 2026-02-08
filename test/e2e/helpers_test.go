@@ -60,6 +60,90 @@ func mustParseQuantity(s string) resource.Quantity {
 	return resource.MustParse(s)
 }
 
+// deleteTunnelInCloudflare deletes a tunnel by ID via the Cloudflare API.
+// Clears active connections first (required before deletion).
+func deleteTunnelInCloudflare(ctx context.Context, cfClient *cloudflare.Client, accountID, tunnelID string) error {
+	// Clear connections first (required by CF API before deletion).
+	_, _ = cfClient.ZeroTrust.Tunnels.Cloudflared.Connections.Delete(ctx, tunnelID, zero_trust.TunnelCloudflaredConnectionDeleteParams{
+		AccountID: cloudflare.F(accountID),
+	})
+
+	_, err := cfClient.ZeroTrust.Tunnels.Cloudflared.Delete(ctx, tunnelID, zero_trust.TunnelCloudflaredDeleteParams{
+		AccountID: cloudflare.F(accountID),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete tunnel %s: %w", tunnelID, err)
+	}
+	return nil
+}
+
+// listTunnelsByPrefixFromCloudflare lists all non-deleted tunnels matching a name prefix.
+func listTunnelsByPrefixFromCloudflare(ctx context.Context, cfClient *cloudflare.Client, accountID, prefix string) ([]CloudflareTunnelInfo, error) {
+	iter := cfClient.ZeroTrust.Tunnels.Cloudflared.ListAutoPaging(ctx, zero_trust.TunnelCloudflaredListParams{
+		AccountID: cloudflare.F(accountID),
+	})
+
+	var tunnels []CloudflareTunnelInfo
+	for iter.Next() {
+		t := iter.Current()
+		if strings.HasPrefix(t.Name, prefix) && t.DeletedAt.IsZero() {
+			tunnels = append(tunnels, CloudflareTunnelInfo{
+				ID:        t.ID,
+				Name:      t.Name,
+				Status:    string(t.Status),
+				DeletedAt: t.DeletedAt,
+			})
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("failed to list tunnels: %w", err)
+	}
+	return tunnels, nil
+}
+
+// createCloudflareAccessPolicyWithApplicationFields creates an AccessPolicy with custom application fields.
+func createCloudflareAccessPolicyWithApplicationFields(
+	ctx context.Context,
+	k8sClient client.Client,
+	name, namespace, targetRouteName, hostname string,
+	appConfig cfgatev1alpha1.AccessApplication,
+) *cfgatev1alpha1.CloudflareAccessPolicy {
+	appConfig.Name = name
+	appConfig.Domain = hostname
+
+	policy := &cfgatev1alpha1.CloudflareAccessPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: cfgatev1alpha1.CloudflareAccessPolicySpec{
+			TargetRef: &cfgatev1alpha1.PolicyTargetReference{
+				Group: "gateway.networking.k8s.io",
+				Kind:  "HTTPRoute",
+				Name:  targetRouteName,
+			},
+			CloudflareRef: &cfgatev1alpha1.CloudflareSecretRef{
+				Name:      "cloudflare-credentials",
+				AccountID: testEnv.CloudflareAccountID,
+			},
+			Application: appConfig,
+			Policies: []cfgatev1alpha1.AccessPolicyRule{
+				{
+					Name:     "allow-all",
+					Decision: "allow",
+					Include: []cfgatev1alpha1.AccessRule{
+						{
+							Everyone: ptrTo(true),
+						},
+					},
+				},
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+	return policy
+}
+
 // Note: testID is defined in e2e_suite_test.go
 
 // ============================================================
@@ -77,9 +161,10 @@ func getCloudflareClient() *cloudflare.Client {
 
 // CloudflareTunnelInfo holds information about a Cloudflare tunnel.
 type CloudflareTunnelInfo struct {
-	ID     string
-	Name   string
-	Status string
+	ID        string
+	Name      string
+	Status    string
+	DeletedAt time.Time
 }
 
 // getTunnelFromCloudflare fetches a tunnel directly from the Cloudflare API.
@@ -93,7 +178,7 @@ func getTunnelFromCloudflare(ctx context.Context, cfClient *cloudflare.Client, a
 	}
 
 	for _, tunnel := range tunnels.Result {
-		if tunnel.Name == tunnelName {
+		if tunnel.Name == tunnelName && string(tunnel.Status) != "deleted" {
 			return &CloudflareTunnelInfo{
 				ID:     tunnel.ID,
 				Name:   tunnel.Name,
@@ -118,9 +203,10 @@ func getTunnelByIDFromCloudflare(ctx context.Context, cfClient *cloudflare.Clien
 	}
 
 	return &CloudflareTunnelInfo{
-		ID:     tunnel.ID,
-		Name:   tunnel.Name,
-		Status: string(tunnel.Status),
+		ID:        tunnel.ID,
+		Name:      tunnel.Name,
+		Status:    string(tunnel.Status),
+		DeletedAt: tunnel.DeletedAt,
 	}, nil
 }
 
@@ -153,13 +239,17 @@ func createTunnelInCloudflare(ctx context.Context, cfClient *cloudflare.Client, 
 // Tunnel Wait Functions
 // ============================================================
 
-// waitForTunnelReady waits for a CloudflareTunnel to have Ready=True condition.
+// waitForTunnelReady waits for a CloudflareTunnel to have Ready=True condition
+// and essential status fields populated (TunnelID, TunnelDomain).
 func waitForTunnelReady(ctx context.Context, k8sClient client.Client, name, namespace string, timeout time.Duration) *cfgatev1alpha1.CloudflareTunnel {
 	var tunnel cfgatev1alpha1.CloudflareTunnel
 
 	Eventually(func() bool {
 		err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, &tunnel)
 		if err != nil {
+			return false
+		}
+		if tunnel.Status.TunnelID == "" || tunnel.Status.TunnelDomain == "" {
 			return false
 		}
 		for _, cond := range tunnel.Status.Conditions {
@@ -300,6 +390,18 @@ type CloudflareAccessApplicationInfo struct {
 	Domain          string
 	AUD             string
 	SessionDuration string
+
+	// P0 fields for §6.3 test assertions.
+	AllowedIdps            []string
+	AutoRedirectToIdentity bool
+	AppLauncherVisible     bool
+
+	// P1 fields for future test expansion.
+	OptionsPreflightBypass      bool
+	PathCookieAttribute         bool
+	ServiceAuth401Redirect      bool
+	CustomNonIdentityDenyUrl    string
+	ReadServiceTokensFromHeader string
 }
 
 // getAccessApplicationFromCloudflare fetches an Access Application by name from Cloudflare.
@@ -311,13 +413,29 @@ func getAccessApplicationFromCloudflare(ctx context.Context, cfClient *cloudflar
 	for iter.Next() {
 		app := iter.Current()
 		if app.Name == appName {
-			return &CloudflareAccessApplicationInfo{
-				ID:              app.ID,
-				Name:            app.Name,
-				Domain:          app.Domain,
-				AUD:             app.AUD,
-				SessionDuration: app.SessionDuration,
-			}, nil
+			info := &CloudflareAccessApplicationInfo{
+				ID:                          app.ID,
+				Name:                        app.Name,
+				Domain:                      app.Domain,
+				AUD:                         app.AUD,
+				SessionDuration:             app.SessionDuration,
+				AutoRedirectToIdentity:      app.AutoRedirectToIdentity,
+				AppLauncherVisible:          app.AppLauncherVisible,
+				OptionsPreflightBypass:      app.OptionsPreflightBypass,
+				PathCookieAttribute:         app.PathCookieAttribute,
+				ServiceAuth401Redirect:      app.ServiceAuth401Redirect,
+				CustomNonIdentityDenyUrl:    app.CustomNonIdentityDenyURL,
+				ReadServiceTokensFromHeader: app.ReadServiceTokensFromHeader,
+			}
+			// AllowedIdPs is interface{} in the union response type.
+			if idps, ok := app.AllowedIdPs.([]interface{}); ok {
+				for _, idp := range idps {
+					if s, ok := idp.(string); ok {
+						info.AllowedIdps = append(info.AllowedIdps, s)
+					}
+				}
+			}
+			return info, nil
 		}
 	}
 
@@ -340,13 +458,33 @@ func getAccessApplicationByIDFromCloudflare(ctx context.Context, cfClient *cloud
 		return nil, fmt.Errorf("failed to get Access application: %w", err)
 	}
 
-	return &CloudflareAccessApplicationInfo{
-		ID:              app.ID,
-		Name:            app.Name,
-		Domain:          app.Domain,
-		AUD:             app.AUD,
-		SessionDuration: app.SessionDuration,
-	}, nil
+	info := &CloudflareAccessApplicationInfo{
+		ID:                          app.ID,
+		Name:                        app.Name,
+		Domain:                      app.Domain,
+		AUD:                         app.AUD,
+		SessionDuration:             app.SessionDuration,
+		AutoRedirectToIdentity:      app.AutoRedirectToIdentity,
+		AppLauncherVisible:          app.AppLauncherVisible,
+		OptionsPreflightBypass:      app.OptionsPreflightBypass,
+		PathCookieAttribute:         app.PathCookieAttribute,
+		ServiceAuth401Redirect:      app.ServiceAuth401Redirect,
+		CustomNonIdentityDenyUrl:    app.CustomNonIdentityDenyURL,
+		ReadServiceTokensFromHeader: app.ReadServiceTokensFromHeader,
+	}
+	// AllowedIdPs is interface{} in the union response type.
+	// SDK apijson may unmarshal as []string or []interface{} depending on type.
+	switch idps := app.AllowedIdPs.(type) {
+	case []string:
+		info.AllowedIdps = idps
+	case []interface{}:
+		for _, idp := range idps {
+			if s, ok := idp.(string); ok {
+				info.AllowedIdps = append(info.AllowedIdps, s)
+			}
+		}
+	}
+	return info, nil
 }
 
 // ============================================================

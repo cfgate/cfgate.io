@@ -39,6 +39,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	cfgatev1alpha1 "cfgate.io/cfgate/api/v1alpha1"
+	cfcloudflare "cfgate.io/cfgate/internal/cloudflare"
 	"cfgate.io/cfgate/internal/cloudflared"
 	"cfgate.io/cfgate/internal/controller"
 	"cfgate.io/cfgate/internal/controller/features"
@@ -73,6 +74,7 @@ var (
 	cfg *rest.Config
 
 	// scheme is the runtime scheme with all types registered.
+	// Populated at init time to avoid data races with manager goroutines.
 	scheme = runtime.NewScheme()
 
 	// ctx is the test context.
@@ -124,80 +126,207 @@ type E2ETestEnv struct {
 	KindClusterName string
 }
 
+func init() {
+	// Register all schemes at package init time so the scheme is fully
+	// populated before any goroutine (manager, informers, reflectors) reads it.
+	// This eliminates the data race between SynchronizedBeforeSuite's second
+	// function (which runs on all processes) and the manager's goroutines on
+	// Process 1 that are already reading from the scheme.
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = cfgatev1alpha1.AddToScheme(scheme)
+	_ = gatewayv1.Install(scheme)
+	_ = gatewayv1b1.Install(scheme)
+}
+
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "E2E Suite")
 }
 
-var _ = BeforeSuite(func() {
-	ctx, cancel = context.WithCancel(context.Background())
+var _ = SynchronizedBeforeSuite(
+	// Process 1: cluster + CRDs + controller manager setup.
+	// Returns kubeconfig path as []byte for all processes.
+	func() []byte {
+		ctx, cancel = context.WithCancel(context.Background())
 
-	// Initialize logger for controller-runtime (@P-LOG-GO-001: logr interface).
-	// Using zap backend with development config for readable test output.
-	zapConfig := zap.NewDevelopmentConfig()
-	zapConfig.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	zapLogger, err := zapConfig.Build()
-	Expect(err).NotTo(HaveOccurred())
-	ctrl.SetLogger(ctrlzap.New(ctrlzap.UseFlagOptions(&ctrlzap.Options{
-		Development: true,
-		ZapOpts:     []zap.Option{zap.WrapCore(func(_ zapcore.Core) zapcore.Core { return zapLogger.Core() })},
-	})))
+		// Initialize logger for controller-runtime.
+		zapConfig := zap.NewDevelopmentConfig()
+		zapConfig.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		zapLogger, err := zapConfig.Build()
+		Expect(err).NotTo(HaveOccurred())
+		ctrl.SetLogger(ctrlzap.New(ctrlzap.UseFlagOptions(&ctrlzap.Options{
+			Development: true,
+			ZapOpts:     []zap.Option{zap.WrapCore(func(_ zapcore.Core) zapcore.Core { return zapLogger.Core() })},
+		})))
 
-	// Initialize schemes.
-	Expect(clientgoscheme.AddToScheme(scheme)).To(Succeed())
-	Expect(cfgatev1alpha1.AddToScheme(scheme)).To(Succeed())
-	Expect(gatewayv1.Install(scheme)).To(Succeed())
-	Expect(gatewayv1b1.Install(scheme)).To(Succeed())
+		// Schemes already registered in init().
 
-	// Load environment configuration.
-	testEnv = loadTestEnv()
+		// Load environment configuration.
+		testEnv = loadTestEnv()
 
-	// Find project root for CRD paths.
-	projectRoot = findProjectRoot()
-	Expect(projectRoot).NotTo(BeEmpty(), "Could not find project root")
+		// Find project root for CRD paths.
+		projectRoot = findProjectRoot()
+		Expect(projectRoot).NotTo(BeEmpty(), "Could not find project root")
 
-	// Set up Kubernetes cluster.
-	if testEnv.UseExistingCluster {
-		setupExistingCluster()
-	} else {
-		setupKindCluster()
-	}
+		// Set up Kubernetes cluster and get kubeconfig path.
+		var kubeconfigPath string
+		if testEnv.UseExistingCluster {
+			kubeconfigPath = setupExistingCluster()
+		} else {
+			kubeconfigPath = setupKindCluster()
+		}
 
-	// Install CRDs.
-	installCRDs()
+		// Install CRDs.
+		installCRDs()
 
-	// Start controller manager in-process.
-	startController()
+		// Start controller manager in-process (Process 1 only).
+		By("Starting controller manager in-process")
 
-	By("E2E test environment ready")
-})
+		var mgrCtx context.Context
+		mgrCtx, mgrCancel = context.WithCancel(context.Background())
 
-var _ = AfterSuite(func() {
-	By("Tearing down E2E test environment")
+		mgr, err = ctrl.NewManager(cfg, ctrl.Options{
+			Scheme:                 scheme,
+			LeaderElection:         false,
+			HealthProbeBindAddress: "0",
+			Metrics:                metricsserver.Options{BindAddress: "0"},
+		})
+		Expect(err).NotTo(HaveOccurred(), "Failed to create manager")
 
-	// Clean orphaned test namespaces BEFORE stopping manager.
-	// This allows finalizers to be processed while controller is still running.
-	if k8sClient != nil && testEnv != nil && !testEnv.SkipCleanup {
-		cleanOrphanedTestNamespaces()
-	}
+		// Detect feature gates (optional Gateway API CRDs).
+		featureGates, err = features.DetectFeatures(k8sClientset.Discovery())
+		Expect(err).NotTo(HaveOccurred(), "Failed to detect feature gates")
+		featureGates.LogFeatures(ctrl.Log.WithName("e2e"))
 
-	// Stop controller manager.
-	if mgrCancel != nil {
-		mgrCancel()
-	}
+		// Initialize shared credential cache for all CF-facing reconcilers (B3 + F3).
+		credCache := cfcloudflare.NewCredentialCache(0) // 0 = default TTL
 
-	// Final cleanup: delete all orphaned E2E resources from Cloudflare.
-	// This is the primary cleanup mechanism - handles tunnels AND DNS records.
-	if testEnv != nil && !testEnv.SkipCleanup && testEnv.CloudflareAPIToken != "" {
-		cleanOrphanedE2EResources()
-	}
+		// Register all 6 controllers.
+		tunnelReconciler := &controller.CloudflareTunnelReconciler{
+			Client:          mgr.GetClient(),
+			Scheme:          mgr.GetScheme(),
+			Recorder:        mgr.GetEventRecorder("cloudflaretunnel-controller"),
+			Builder:         cloudflared.NewBuilder(),
+			APIReader:       mgr.GetAPIReader(),
+			CredentialCache: credCache,
+		}
+		Expect(tunnelReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup tunnel controller")
 
-	if testEnv != nil && !testEnv.SkipCleanup && !testEnv.UseExistingCluster {
-		teardownKindCluster()
-	}
+		dnsReconciler := &controller.CloudflareDNSReconciler{
+			Client:          mgr.GetClient(),
+			Scheme:          mgr.GetScheme(),
+			Recorder:        mgr.GetEventRecorder("cloudflaredns-controller"),
+			CredentialCache: credCache,
+		}
+		Expect(dnsReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup DNS controller")
 
-	cancel()
-})
+		accessReconciler := &controller.CloudflareAccessPolicyReconciler{
+			Client:          mgr.GetClient(),
+			Scheme:          mgr.GetScheme(),
+			Recorder:        mgr.GetEventRecorder("cloudflareaccesspolicy-controller"),
+			FeatureGates:    featureGates,
+			CredentialCache: credCache,
+		}
+		Expect(accessReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup access policy controller")
+
+		httpRouteReconciler := &controller.HTTPRouteReconciler{
+			Client:   mgr.GetClient(),
+			Scheme:   mgr.GetScheme(),
+			Recorder: mgr.GetEventRecorder("httproute-controller"),
+		}
+		Expect(httpRouteReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup HTTPRoute controller")
+
+		// Gateway + GatewayClass controllers (F2: register both).
+		gatewayReconciler := &controller.GatewayReconciler{
+			Client:   mgr.GetClient(),
+			Scheme:   mgr.GetScheme(),
+			Recorder: mgr.GetEventRecorder("gateway-controller"),
+		}
+		Expect(gatewayReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup Gateway controller")
+
+		gatewayClassReconciler := &controller.GatewayClassReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}
+		Expect(gatewayClassReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup GatewayClass controller")
+
+		// Start manager in background goroutine.
+		go func() {
+			defer GinkgoRecover()
+			err := mgr.Start(mgrCtx)
+			if err != nil && mgrCtx.Err() == nil {
+				Fail(fmt.Sprintf("Manager failed to start: %v", err))
+			}
+		}()
+
+		// Wait for manager caches to sync.
+		Eventually(func() bool {
+			return mgr.GetCache().WaitForCacheSync(mgrCtx)
+		}, 30*time.Second, 100*time.Millisecond).Should(BeTrue(), "Manager caches did not sync")
+
+		By("E2E test environment ready (Process 1)")
+		return []byte(kubeconfigPath)
+	},
+	// All processes: create K8s clients from kubeconfig path.
+	// NO manager creation — only Process 1 runs the controller.
+	func(data []byte) {
+		kubeconfigPath := string(data)
+
+		// Schemes already registered in init().
+
+		// Build clients from kubeconfig path.
+		var err error
+		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		Expect(err).NotTo(HaveOccurred(), "Failed to build REST config")
+
+		k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
+		Expect(err).NotTo(HaveOccurred(), "Failed to create controller-runtime client")
+
+		k8sClientset, err = kubernetes.NewForConfig(cfg)
+		Expect(err).NotTo(HaveOccurred(), "Failed to create clientset")
+
+		// Load test environment (env vars available in all processes).
+		testEnv = loadTestEnv()
+
+		// Set up context for all processes.
+		ctx, cancel = context.WithCancel(context.Background())
+	},
+)
+
+var _ = SynchronizedAfterSuite(
+	// All processes: intentionally empty.
+	// Each test cleans its own namespace via DeferCleanup/AfterAll.
+	// We do NOT clean namespaces here because other parallel processes may still
+	// have specs running — deleting their namespaces causes "forbidden: unable to
+	// create new content in namespace" or "namespace not found" failures.
+	func() {},
+	// Process 1 only: runs AFTER all processes complete.
+	// Sequential cleanup: namespaces → manager → CF sweep → cluster teardown.
+	func() {
+		// 1. Clean orphaned namespaces WHILE MANAGER IS STILL RUNNING.
+		// Finalizers on CRDs need the controller to process deletions.
+		if k8sClient != nil && testEnv != nil && !testEnv.SkipCleanup {
+			cleanOrphanedTestNamespaces()
+		}
+
+		// 2. Stop manager AFTER namespace cleanup completes.
+		if mgrCancel != nil {
+			mgrCancel()
+		}
+
+		// 3. Sweep orphaned CF resources (doesn't need running manager).
+		if testEnv != nil && !testEnv.SkipCleanup && testEnv.CloudflareAPIToken != "" {
+			cleanOrphanedE2EResources()
+		}
+
+		// 4. Teardown cluster.
+		if testEnv != nil && !testEnv.SkipCleanup && !testEnv.UseExistingCluster {
+			teardownKindCluster()
+		}
+
+		cancel()
+	},
+)
 
 // testID generates a deterministic resource name based on Ginkgo node for parallel safety.
 // Format: e2e-{type}-{node}-{line}
@@ -208,7 +337,8 @@ func testID(resourceType string) string {
 }
 
 // cleanOrphanedTestNamespaces removes any test namespaces that weren't cleaned up.
-// Must be called BEFORE stopping the controller manager so finalizers can be processed.
+// Called in SynchronizedAfterSuite all-process phase while controller is still alive.
+// The running controller processes finalizers naturally as CRs are deleted (F1: trust controller).
 func cleanOrphanedTestNamespaces() {
 	By("Cleaning orphaned test namespaces")
 
@@ -220,17 +350,14 @@ func cleanOrphanedTestNamespaces() {
 		return
 	}
 
+	// Delete namespaces and let the running controller process finalizers.
 	for _, ns := range nsList.Items {
-		// Remove finalizers from cfgate resources to prevent blocking.
-		removeCfgateFinalizersInNamespace(ns.Name)
-
-		// Delete namespace.
 		if err := k8sClient.Delete(ctx, &ns); err != nil && !apierrors.IsNotFound(err) {
 			GinkgoWriter.Printf("Warning: failed to delete namespace %s: %v\n", ns.Name, err)
 		}
 	}
 
-	// Wait for namespaces to terminate.
+	// Wait for namespaces to terminate (controller processes finalizers during this wait).
 	for _, ns := range nsList.Items {
 		Eventually(func() bool {
 			var check corev1.Namespace
@@ -238,52 +365,6 @@ func cleanOrphanedTestNamespaces() {
 			return apierrors.IsNotFound(err)
 		}, 60*time.Second, 1*time.Second).Should(BeTrue(),
 			"Namespace %s did not terminate", ns.Name)
-	}
-}
-
-// removeCfgateFinalizersInNamespace removes finalizers from all cfgate resources in a namespace.
-// This prevents resources from blocking namespace deletion.
-func removeCfgateFinalizersInNamespace(namespace string) {
-	// Remove finalizers from CloudflareTunnels.
-	var tunnels cfgatev1alpha1.CloudflareTunnelList
-	if err := k8sClient.List(ctx, &tunnels, client.InNamespace(namespace)); err == nil {
-		for i := range tunnels.Items {
-			if len(tunnels.Items[i].Finalizers) > 0 {
-				tunnels.Items[i].Finalizers = nil
-				if err := k8sClient.Update(ctx, &tunnels.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-					GinkgoWriter.Printf("Warning: failed to remove finalizers from tunnel %s: %v\n",
-						tunnels.Items[i].Name, err)
-				}
-			}
-		}
-	}
-
-	// Remove finalizers from CloudflareDNS (alpha.3: separate CRD).
-	var dnsResources cfgatev1alpha1.CloudflareDNSList
-	if err := k8sClient.List(ctx, &dnsResources, client.InNamespace(namespace)); err == nil {
-		for i := range dnsResources.Items {
-			if len(dnsResources.Items[i].Finalizers) > 0 {
-				dnsResources.Items[i].Finalizers = nil
-				if err := k8sClient.Update(ctx, &dnsResources.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-					GinkgoWriter.Printf("Warning: failed to remove finalizers from dns %s: %v\n",
-						dnsResources.Items[i].Name, err)
-				}
-			}
-		}
-	}
-
-	// Remove finalizers from CloudflareAccessPolicies (alpha.3).
-	var policies cfgatev1alpha1.CloudflareAccessPolicyList
-	if err := k8sClient.List(ctx, &policies, client.InNamespace(namespace)); err == nil {
-		for i := range policies.Items {
-			if len(policies.Items[i].Finalizers) > 0 {
-				policies.Items[i].Finalizers = nil
-				if err := k8sClient.Update(ctx, &policies.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-					GinkgoWriter.Printf("Warning: failed to remove finalizers from access policy %s: %v\n",
-						policies.Items[i].Name, err)
-				}
-			}
-		}
 	}
 }
 
@@ -508,8 +589,9 @@ func findProjectRoot() string {
 	}
 }
 
-// setupKindCluster creates a kind cluster for testing.
-func setupKindCluster() {
+// setupKindCluster creates a kind cluster and returns the kubeconfig path.
+// Also sets up cfg, k8sClient, k8sClientset for Process 1 use during CRD installation.
+func setupKindCluster() string {
 	By("Creating kind cluster: " + testEnv.KindClusterName)
 
 	cmd := exec.CommandContext(ctx, "kind", "create", "cluster",
@@ -530,7 +612,7 @@ func setupKindCluster() {
 	kubeconfigPath := filepath.Join(os.TempDir(), fmt.Sprintf("cfgate-e2e-%s.kubeconfig", testEnv.KindClusterName))
 	Expect(os.WriteFile(kubeconfigPath, kubeconfigBytes, 0600)).To(Succeed())
 
-	// Set up clients.
+	// Set up clients (Process 1 needs these for CRD installation + controller setup).
 	cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	Expect(err).NotTo(HaveOccurred(), "Failed to build REST config")
 
@@ -545,10 +627,13 @@ func setupKindCluster() {
 		_, err := k8sClientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 		return err
 	}, 60*time.Second, 1*time.Second).Should(Succeed(), "API server not ready")
+
+	return kubeconfigPath
 }
 
-// setupExistingCluster sets up clients for an existing cluster.
-func setupExistingCluster() {
+// setupExistingCluster sets up clients for an existing cluster and returns the kubeconfig path.
+// Also sets up cfg, k8sClient, k8sClientset for Process 1 use during CRD installation.
+func setupExistingCluster() string {
 	By("Using existing Kubernetes cluster")
 
 	var err error
@@ -571,6 +656,8 @@ func setupExistingCluster() {
 	// Verify cluster is accessible.
 	_, err = k8sClientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to connect to existing cluster")
+
+	return kubeconfigPath
 }
 
 // teardownKindCluster deletes the kind cluster.
@@ -650,77 +737,6 @@ func installCRDs() {
 	}, 30*time.Second, 1*time.Second).Should(BeTrue(), "cfgate CRDs not fully registered in API server")
 }
 
-// startController starts the controller manager in-process.
-func startController() {
-	By("Starting controller manager in-process")
-
-	var err error
-	var mgrCtx context.Context
-	mgrCtx, mgrCancel = context.WithCancel(context.Background())
-
-	// Create manager.
-	mgr, err = ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:                 scheme,
-		LeaderElection:         false,
-		HealthProbeBindAddress: "0",                                     // Disable health probe
-		Metrics:                metricsserver.Options{BindAddress: "0"}, // Disable metrics
-	})
-	Expect(err).NotTo(HaveOccurred(), "Failed to create manager")
-
-	// Detect feature gates (optional Gateway API CRDs).
-	featureGates, err = features.DetectFeatures(k8sClientset.Discovery())
-	Expect(err).NotTo(HaveOccurred(), "Failed to detect feature gates")
-	featureGates.LogFeatures(ctrl.Log.WithName("e2e"))
-
-	// Set up CloudflareTunnel controller.
-	tunnelReconciler := &controller.CloudflareTunnelReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorder("cloudflaretunnel-controller"),
-		Builder:  cloudflared.NewBuilder(),
-	}
-	Expect(tunnelReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup tunnel controller")
-
-	// CloudflareDNS controller (alpha.3: separate CRD).
-	dnsReconciler := &controller.CloudflareDNSReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorder("cloudflaredns-controller"),
-	}
-	Expect(dnsReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup DNS controller")
-
-	// CloudflareAccessPolicy controller.
-	accessReconciler := &controller.CloudflareAccessPolicyReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		Recorder:     mgr.GetEventRecorder("cloudflareaccesspolicy-controller"),
-		FeatureGates: featureGates,
-	}
-	Expect(accessReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup access policy controller")
-
-	// HTTPRoute controller.
-	httpRouteReconciler := &controller.HTTPRouteReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorder("httproute-controller"),
-	}
-	Expect(httpRouteReconciler.SetupWithManager(mgr)).To(Succeed(), "Failed to setup HTTPRoute controller")
-
-	// Start manager in background.
-	go func() {
-		defer GinkgoRecover()
-		err := mgr.Start(mgrCtx)
-		if err != nil && mgrCtx.Err() == nil {
-			Fail(fmt.Sprintf("Manager failed to start: %v", err))
-		}
-	}()
-
-	// Wait for manager caches to sync.
-	Eventually(func() bool {
-		return mgr.GetCache().WaitForCacheSync(mgrCtx)
-	}, 30*time.Second, 100*time.Millisecond).Should(BeTrue(), "Manager caches did not sync")
-}
-
 // createTestNamespace creates a unique namespace for a test.
 func createTestNamespace(prefix string) *corev1.Namespace {
 	ns := &corev1.Namespace{
@@ -742,22 +758,48 @@ func deleteTestNamespace(ns *corev1.Namespace) {
 		return
 	}
 
-	// Delete CloudflareTunnels first - finalizers need the Secret which lives in namespace.
+	// Delete all cfgate CRs first — finalizers need the Secret which lives in namespace.
+	// Pre-deleting CRs triggers the controller to process deletions while the
+	// namespace (and its Secrets) still exist, avoiding orphaned finalizers.
+
+	// CloudflareTunnels
 	var tunnels cfgatev1alpha1.CloudflareTunnelList
 	if err := k8sClient.List(ctx, &tunnels, client.InNamespace(ns.Name)); err == nil {
 		for i := range tunnels.Items {
 			_ = k8sClient.Delete(ctx, &tunnels.Items[i])
 		}
-		// Wait for tunnels to be fully deleted (finalizers complete).
-		Eventually(func() bool {
-			var check cfgatev1alpha1.CloudflareTunnelList
-			if err := k8sClient.List(ctx, &check, client.InNamespace(ns.Name)); err != nil {
-				return true
-			}
-			return len(check.Items) == 0
-		}, 60*time.Second, 1*time.Second).Should(BeTrue(),
-			"CloudflareTunnels in namespace %s did not terminate", ns.Name)
 	}
+
+	// CloudflareAccessPolicies
+	var policies cfgatev1alpha1.CloudflareAccessPolicyList
+	if err := k8sClient.List(ctx, &policies, client.InNamespace(ns.Name)); err == nil {
+		for i := range policies.Items {
+			_ = k8sClient.Delete(ctx, &policies.Items[i])
+		}
+	}
+
+	// CloudflareDNS
+	var dnsRecords cfgatev1alpha1.CloudflareDNSList
+	if err := k8sClient.List(ctx, &dnsRecords, client.InNamespace(ns.Name)); err == nil {
+		for i := range dnsRecords.Items {
+			_ = k8sClient.Delete(ctx, &dnsRecords.Items[i])
+		}
+	}
+
+	// Wait for all CR types to be fully deleted (finalizers complete).
+	Eventually(func() bool {
+		var tCheck cfgatev1alpha1.CloudflareTunnelList
+		var pCheck cfgatev1alpha1.CloudflareAccessPolicyList
+		var dCheck cfgatev1alpha1.CloudflareDNSList
+		tErr := k8sClient.List(ctx, &tCheck, client.InNamespace(ns.Name))
+		pErr := k8sClient.List(ctx, &pCheck, client.InNamespace(ns.Name))
+		dErr := k8sClient.List(ctx, &dCheck, client.InNamespace(ns.Name))
+		tDone := tErr != nil || len(tCheck.Items) == 0
+		pDone := pErr != nil || len(pCheck.Items) == 0
+		dDone := dErr != nil || len(dCheck.Items) == 0
+		return tDone && pDone && dDone
+	}, 120*time.Second, 1*time.Second).Should(BeTrue(),
+		"cfgate CRs in namespace %s did not terminate", ns.Name)
 
 	// Delete namespace after CRs are gone.
 	Expect(k8sClient.Delete(ctx, ns)).To(Succeed())

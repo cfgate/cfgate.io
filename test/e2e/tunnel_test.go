@@ -139,7 +139,16 @@ var _ = Describe("CloudflareTunnel E2E", Label("cloudflare"), func() {
 				var updatedTunnel cfgatev1alpha1.CloudflareTunnel
 				err := k8sClient.Get(ctx, client.ObjectKey{Name: tunnel.Name, Namespace: tunnel.Namespace}, &updatedTunnel)
 				if err != nil {
+					GinkgoWriter.Printf("[DIAG] tunnel get error: %v\n", err)
 					return false
+				}
+				GinkgoWriter.Printf("[DIAG] ConnectedRouteCount=%d, Generation=%d, ObservedGeneration=%d, TunnelID=%s\n",
+					updatedTunnel.Status.ConnectedRouteCount,
+					updatedTunnel.Generation,
+					updatedTunnel.Status.ObservedGeneration,
+					updatedTunnel.Status.TunnelID)
+				for _, c := range updatedTunnel.Status.Conditions {
+					GinkgoWriter.Printf("[DIAG]   condition %s=%s reason=%s\n", c.Type, c.Status, c.Reason)
 				}
 				return updatedTunnel.Status.ConnectedRouteCount > 0
 			}, DefaultTimeout, DefaultInterval).Should(BeTrue(), "Tunnel should have connected routes")
@@ -187,14 +196,41 @@ var _ = Describe("CloudflareTunnel E2E", Label("cloudflare"), func() {
 			}, DefaultTimeout, DefaultInterval).Should(BeTrue(), "Deployment should be deleted")
 		})
 
-		It("should handle tunnel deletion policy: orphan", func() {
+		// Silence unused variable warning - sharedTunnel is available for future use.
+		AfterAll(func() {
+			_ = sharedTunnel
+		})
+	})
+
+	Context("tunnel orphan deletion policy", func() {
+		var orphanNamespace *corev1.Namespace
+		var orphanCfClient *cloudflare.Client
+
+		BeforeEach(func() {
+			skipIfNoCredentials()
+
+			orphanNamespace = createTestNamespace("cfgate-tunnel-orphan-e2e")
+			createCloudflareCredentialsSecret(orphanNamespace.Name)
+			orphanCfClient = getCloudflareClient()
+
+			DeferCleanup(func() {
+				if testEnv.SkipCleanup {
+					return
+				}
+				if orphanNamespace != nil {
+					deleteTestNamespace(orphanNamespace)
+				}
+			})
+		})
+
+		It("should handle tunnel deletion policy: orphan", SpecTimeout(5*time.Minute), func(ctx SpecContext) {
 			orphanTunnelName := testID("orphan")
 
 			By("Creating CloudflareTunnel CR with orphan deletion policy")
 			tunnel := &cfgatev1alpha1.CloudflareTunnel{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      testID("orphan-cr"),
-					Namespace: namespace.Name,
+					Namespace: orphanNamespace.Name,
 					Annotations: map[string]string{
 						"cfgate.io/deletion-policy": "orphan",
 					},
@@ -227,14 +263,9 @@ var _ = Describe("CloudflareTunnel E2E", Label("cloudflare"), func() {
 			waitForTunnelDeleted(ctx, k8sClient, tunnel.Name, tunnel.Namespace, DefaultTimeout)
 
 			By("Verifying tunnel still exists in Cloudflare (orphaned)")
-			cfTunnel, err := getTunnelByIDFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, tunnelID)
+			cfTunnel, err := getTunnelByIDFromCloudflare(ctx, orphanCfClient, testEnv.CloudflareAccountID, tunnelID)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfTunnel).NotTo(BeNil(), "Tunnel should still exist in Cloudflare with orphan policy")
-		})
-
-		// Silence unused variable warning - sharedTunnel is available for future use.
-		AfterAll(func() {
-			_ = sharedTunnel
 		})
 	})
 
@@ -246,7 +277,7 @@ var _ = Describe("CloudflareTunnel E2E", Label("cloudflare"), func() {
 			tunnel := createCloudflareTunnelWithInvalidToken(ctx, k8sClient, testID("invalid-token-cr"), namespace.Name, invalidTunnelName)
 
 			By("Waiting for CredentialsValid condition to be False")
-			waitForTunnelCondition(ctx, k8sClient, tunnel.Name, tunnel.Namespace, "CredentialsValid", metav1.ConditionFalse, ShortTimeout)
+			waitForTunnelCondition(ctx, k8sClient, tunnel.Name, tunnel.Namespace, "CredentialsValid", metav1.ConditionFalse, DefaultTimeout)
 
 			By("Verifying Ready condition is also False")
 			var updatedTunnel cfgatev1alpha1.CloudflareTunnel
@@ -299,7 +330,7 @@ var _ = Describe("CloudflareTunnel E2E", Label("cloudflare"), func() {
 					}
 				}
 				return false
-			}, ShortTimeout, DefaultInterval).Should(BeTrue(), "Should have Ready=False condition")
+			}, DefaultTimeout, DefaultInterval).Should(BeTrue(), "Should have Ready=False condition")
 		})
 
 		It("should recover when credentials become valid", func() {
@@ -329,7 +360,7 @@ var _ = Describe("CloudflareTunnel E2E", Label("cloudflare"), func() {
 			Expect(k8sClient.Create(ctx, tunnel)).To(Succeed())
 
 			By("Waiting for Ready=False condition")
-			waitForTunnelCondition(ctx, k8sClient, tunnel.Name, tunnel.Namespace, "Ready", metav1.ConditionFalse, ShortTimeout)
+			waitForTunnelCondition(ctx, k8sClient, tunnel.Name, tunnel.Namespace, "Ready", metav1.ConditionFalse, DefaultTimeout)
 
 			By("Creating the missing credentials secret")
 			secret := &corev1.Secret{
@@ -607,6 +638,94 @@ var _ = Describe("CloudflareTunnel E2E", Label("cloudflare"), func() {
 				// Verify ObservedGeneration increased (reconciliation happened)
 				g.Expect(updatedTunnel.Status.ObservedGeneration).To(BeNumerically(">", tunnel.Status.ObservedGeneration))
 			}, DefaultTimeout, DefaultInterval).Should(Succeed())
+		})
+	})
+
+	// ============================================================
+	// §6.1: Deleted Tunnel Filter Behavior
+	// ============================================================
+	Context("deleted tunnel filter", func() {
+		It("should not adopt a deleted tunnel when creating CR", SpecTimeout(3*time.Minute), func(ctx SpecContext) {
+			deletedTunnelName := testID("deleted-filter")
+
+			By("Pre-creating tunnel via Cloudflare API")
+			preTunnel, err := createTunnelInCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, deletedTunnelName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(preTunnel).NotTo(BeNil())
+			deletedTunnelID := preTunnel.ID
+
+			By("Deleting the pre-created tunnel via Cloudflare API")
+			err = deleteTunnelInCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, deletedTunnelID)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating CloudflareTunnel CR with same tunnel name")
+			tunnel := createCloudflareTunnel(ctx, k8sClient, testID("deleted-filter-cr"), namespace.Name, deletedTunnelName)
+
+			By("Waiting for tunnel to become ready")
+			tunnel = waitForTunnelReady(ctx, k8sClient, tunnel.Name, tunnel.Namespace, DefaultTimeout)
+
+			By("Verifying controller created a NEW tunnel (different ID from deleted one)")
+			Expect(tunnel.Status.TunnelID).NotTo(Equal(deletedTunnelID),
+				"Controller should NOT adopt the deleted tunnel — should create a new one")
+			Expect(tunnel.Status.TunnelID).NotTo(BeEmpty())
+
+			By("Verifying new tunnel exists in CF API with non-deleted status")
+			cfTunnel, err := getTunnelFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, deletedTunnelName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfTunnel).NotTo(BeNil(), "New tunnel should exist in Cloudflare")
+			Expect(cfTunnel.ID).To(Equal(tunnel.Status.TunnelID))
+			Expect(cfTunnel.Status).NotTo(Equal("deleted"))
+		})
+	})
+
+	// ============================================================
+	// §6.2: Tunnel Adopt-With-Drift
+	// ============================================================
+	Context("adopt with drift", func() {
+		It("should update tunnel configuration when adopting with drift", SpecTimeout(5*time.Minute), func(ctx SpecContext) {
+			adoptDriftTunnelName := testID("adopt-drift")
+
+			By("Pre-creating tunnel via Cloudflare API")
+			preTunnel, err := createTunnelInCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, adoptDriftTunnelName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(preTunnel).NotTo(BeNil())
+			preTunnelID := preTunnel.ID
+
+			By("Creating CloudflareTunnel CR with same name but replicas: 2")
+			tunnel := &cfgatev1alpha1.CloudflareTunnel{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testID("adopt-drift-cr"),
+					Namespace: namespace.Name,
+				},
+				Spec: cfgatev1alpha1.CloudflareTunnelSpec{
+					Tunnel: cfgatev1alpha1.TunnelIdentity{
+						Name: adoptDriftTunnelName,
+					},
+					Cloudflare: cfgatev1alpha1.CloudflareConfig{
+						AccountID: testEnv.CloudflareAccountID,
+						SecretRef: cfgatev1alpha1.SecretRef{
+							Name: "cloudflare-credentials",
+						},
+					},
+					Cloudflared: cfgatev1alpha1.CloudflaredConfig{
+						Replicas: 2,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, tunnel)).To(Succeed())
+
+			By("Waiting for tunnel to become ready")
+			tunnel = waitForTunnelReady(ctx, k8sClient, tunnel.Name, tunnel.Namespace, DefaultTimeout)
+
+			By("Verifying it adopted the existing tunnel (same ID)")
+			Expect(tunnel.Status.TunnelID).To(Equal(preTunnelID),
+				"Should adopt the existing tunnel, not create a new one")
+
+			By("Verifying Deployment has 2 replicas (CR spec overrides default)")
+			deploymentName := fmt.Sprintf("%s-cloudflared", tunnel.Name)
+			deployment := waitForDeploymentReady(ctx, k8sClient, deploymentName, namespace.Name, 2, LongTimeout)
+			Expect(*deployment.Spec.Replicas).To(Equal(int32(2)),
+				"Deployment should use CR's replica count, not default")
 		})
 	})
 

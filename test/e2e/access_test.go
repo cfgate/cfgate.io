@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	cloudflare "github.com/cloudflare/cloudflare-go/v6"
+	"github.com/cloudflare/cloudflare-go/v6/zero_trust"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -719,6 +720,181 @@ var _ = Describe("CloudflareAccessPolicy E2E", Label("cloudflare"), func() {
 
 			// Note: Warning event verification would require event recording assertions.
 			// The controller should emit a warning event for "everyone" rules.
+		})
+	})
+
+	// ============================================================
+	// §6.3: P0 Application Field Assertions
+	// ============================================================
+	Context("P0 application field assertions", func() {
+		It("should set appLauncherVisible=false on Access application", SpecTimeout(5*time.Minute), func(ctx SpecContext) {
+			By("Creating HTTPRoute for target")
+			policyName := testID("access-launcher")
+			hostname := fmt.Sprintf("%s.%s", policyName, testEnv.CloudflareZoneName)
+			routeName := policyName + "-route"
+
+			gcName := testID("gc")
+			createGatewayClass(ctx, k8sClient, gcName)
+			gw := createGateway(ctx, k8sClient, policyName+"-gw", namespace.Name, gcName, "")
+			svc := createTestService(ctx, k8sClient, policyName+"-svc", namespace.Name, 8080)
+			createHTTPRoute(ctx, k8sClient, routeName, namespace.Name, gw.Name, []string{hostname}, svc.Name, 8080)
+
+			By("Creating CloudflareAccessPolicy with appLauncherVisible=false")
+			policy := createCloudflareAccessPolicyWithApplicationFields(ctx, k8sClient,
+				policyName, namespace.Name, routeName, hostname,
+				cfgatev1alpha1.AccessApplication{
+					AppLauncherVisible: ptrTo(false),
+				},
+			)
+
+			By("Waiting for AccessPolicy to become ready")
+			policy = waitForAccessPolicyReady(ctx, k8sClient, policy.Name, policy.Namespace, DefaultTimeout)
+
+			By("Verifying CF API: appLauncherVisible == false")
+			Eventually(func(g Gomega) {
+				cfApp, err := getAccessApplicationByIDFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, policy.Status.ApplicationID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cfApp).NotTo(BeNil())
+				g.Expect(cfApp.AppLauncherVisible).To(BeFalse(), "AppLauncherVisible should be false in CF API")
+			}, DefaultTimeout, DefaultInterval).Should(Succeed())
+		})
+
+		It("should set allowedIdps on Access application", SpecTimeout(5*time.Minute), func(ctx SpecContext) {
+			skipIfNoIdP()
+
+			By("Creating HTTPRoute for target")
+			policyName := testID("access-idps")
+			hostname := fmt.Sprintf("%s.%s", policyName, testEnv.CloudflareZoneName)
+			routeName := policyName + "-route"
+
+			gcName := testID("gc")
+			createGatewayClass(ctx, k8sClient, gcName)
+			gw := createGateway(ctx, k8sClient, policyName+"-gw", namespace.Name, gcName, "")
+			svc := createTestService(ctx, k8sClient, policyName+"-svc", namespace.Name, 8080)
+			createHTTPRoute(ctx, k8sClient, routeName, namespace.Name, gw.Name, []string{hostname}, svc.Name, 8080)
+
+			By("Creating CloudflareAccessPolicy with allowedIdps")
+			policy := createCloudflareAccessPolicyWithApplicationFields(ctx, k8sClient,
+				policyName, namespace.Name, routeName, hostname,
+				cfgatev1alpha1.AccessApplication{
+					AllowedIdps: []string{testEnv.CloudflareIdPID},
+				},
+			)
+
+			By("Waiting for AccessPolicy to become ready")
+			policy = waitForAccessPolicyReady(ctx, k8sClient, policy.Name, policy.Namespace, DefaultTimeout)
+
+			By("Verifying CF API: allowedIdps matches")
+			Eventually(func(g Gomega) {
+				cfApp, err := getAccessApplicationByIDFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, policy.Status.ApplicationID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cfApp).NotTo(BeNil())
+				GinkgoWriter.Printf("[DIAG] AllowedIdps=%v (len=%d), expected IdP=%s\n",
+					cfApp.AllowedIdps, len(cfApp.AllowedIdps), testEnv.CloudflareIdPID)
+				// Also check the raw SDK response for type debugging.
+				rawApp, rawErr := cfClient.ZeroTrust.Access.Applications.Get(ctx, policy.Status.ApplicationID, zero_trust.AccessApplicationGetParams{
+					AccountID: cloudflare.F(testEnv.CloudflareAccountID),
+				})
+				if rawErr == nil {
+					GinkgoWriter.Printf("[DIAG] Raw AllowedIdPs type=%T value=%v\n", rawApp.AllowedIdPs, rawApp.AllowedIdPs)
+				} else {
+					GinkgoWriter.Printf("[DIAG] Raw SDK Get error: %v\n", rawErr)
+				}
+				g.Expect(cfApp.AllowedIdps).To(ContainElement(testEnv.CloudflareIdPID),
+					"AllowedIdps should contain the configured IdP ID")
+			}, DefaultTimeout, DefaultInterval).Should(Succeed())
+		})
+
+		It("should set autoRedirectToIdentity on Access application", SpecTimeout(5*time.Minute), func(ctx SpecContext) {
+			skipIfNoIdP()
+
+			By("Creating HTTPRoute for target")
+			policyName := testID("access-autoredirect")
+			hostname := fmt.Sprintf("%s.%s", policyName, testEnv.CloudflareZoneName)
+			routeName := policyName + "-route"
+
+			gcName := testID("gc")
+			createGatewayClass(ctx, k8sClient, gcName)
+			gw := createGateway(ctx, k8sClient, policyName+"-gw", namespace.Name, gcName, "")
+			svc := createTestService(ctx, k8sClient, policyName+"-svc", namespace.Name, 8080)
+			createHTTPRoute(ctx, k8sClient, routeName, namespace.Name, gw.Name, []string{hostname}, svc.Name, 8080)
+
+			By("Creating CloudflareAccessPolicy with autoRedirectToIdentity + allowedIdps")
+			policy := createCloudflareAccessPolicyWithApplicationFields(ctx, k8sClient,
+				policyName, namespace.Name, routeName, hostname,
+				cfgatev1alpha1.AccessApplication{
+					AllowedIdps:            []string{testEnv.CloudflareIdPID},
+					AutoRedirectToIdentity: true,
+				},
+			)
+
+			By("Waiting for AccessPolicy to become ready")
+			policy = waitForAccessPolicyReady(ctx, k8sClient, policy.Name, policy.Namespace, DefaultTimeout)
+
+			By("Verifying CF API: autoRedirectToIdentity == true")
+			Eventually(func(g Gomega) {
+				cfApp, err := getAccessApplicationByIDFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, policy.Status.ApplicationID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cfApp).NotTo(BeNil())
+				g.Expect(cfApp.AutoRedirectToIdentity).To(BeTrue(),
+					"AutoRedirectToIdentity should be true in CF API")
+			}, DefaultTimeout, DefaultInterval).Should(Succeed())
+		})
+
+		It("should update application when spec changes", SpecTimeout(5*time.Minute), func(ctx SpecContext) {
+			By("Creating HTTPRoute for target")
+			policyName := testID("access-specupdate")
+			hostname := fmt.Sprintf("%s.%s", policyName, testEnv.CloudflareZoneName)
+			routeName := policyName + "-route"
+
+			gcName := testID("gc")
+			createGatewayClass(ctx, k8sClient, gcName)
+			gw := createGateway(ctx, k8sClient, policyName+"-gw", namespace.Name, gcName, "")
+			svc := createTestService(ctx, k8sClient, policyName+"-svc", namespace.Name, 8080)
+			createHTTPRoute(ctx, k8sClient, routeName, namespace.Name, gw.Name, []string{hostname}, svc.Name, 8080)
+
+			By("Creating CloudflareAccessPolicy with default sessionDuration=24h")
+			policy := createCloudflareAccessPolicy(ctx, k8sClient, policyName, namespace.Name, routeName, hostname)
+
+			By("Waiting for AccessPolicy to become ready")
+			policy = waitForAccessPolicyReady(ctx, k8sClient, policy.Name, policy.Namespace, DefaultTimeout)
+			initialGen := policy.Status.ObservedGeneration
+
+			By("Verifying initial CF app sessionDuration")
+			Eventually(func(g Gomega) {
+				cfApp, err := getAccessApplicationByIDFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, policy.Status.ApplicationID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cfApp).NotTo(BeNil())
+				g.Expect(cfApp.SessionDuration).To(Equal("24h"))
+			}, DefaultTimeout, DefaultInterval).Should(Succeed())
+
+			By("Updating spec.application.sessionDuration to 12h")
+			Eventually(func() error {
+				var p cfgatev1alpha1.CloudflareAccessPolicy
+				if err := k8sClient.Get(ctx, client.ObjectKey{Name: policyName, Namespace: namespace.Name}, &p); err != nil {
+					return err
+				}
+				p.Spec.Application.SessionDuration = "12h"
+				return k8sClient.Update(ctx, &p)
+			}, DefaultTimeout, DefaultInterval).Should(Succeed())
+
+			By("Waiting for ObservedGeneration to bump")
+			Eventually(func() int64 {
+				var p cfgatev1alpha1.CloudflareAccessPolicy
+				if err := k8sClient.Get(ctx, client.ObjectKey{Name: policyName, Namespace: namespace.Name}, &p); err != nil {
+					return -1
+				}
+				return p.Status.ObservedGeneration
+			}, DefaultTimeout, DefaultInterval).Should(BeNumerically(">", initialGen))
+
+			By("Verifying CF API: sessionDuration updated to 12h")
+			Eventually(func(g Gomega) {
+				cfApp, err := getAccessApplicationByIDFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, policy.Status.ApplicationID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cfApp).NotTo(BeNil())
+				g.Expect(cfApp.SessionDuration).To(Equal("12h"),
+					"CF API sessionDuration should be updated to 12h")
+			}, DefaultTimeout, DefaultInterval).Should(Succeed())
 		})
 	})
 

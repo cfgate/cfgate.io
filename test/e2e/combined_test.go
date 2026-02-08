@@ -421,34 +421,42 @@ var _ = Describe("Multi-Resource E2E", Label("cloudflare"), Ordered, func() {
 			By("Concurrently updating tunnel spec and route")
 			var wg sync.WaitGroup
 
-			// Update tunnel spec
+			// Update tunnel spec (retry on conflict — controller may update status concurrently)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				defer GinkgoRecover()
 
-				var t cfgatev1alpha1.CloudflareTunnel
-				Expect(k8sClient.Get(ctx, client.ObjectKey{Name: sharedTunnel.Name, Namespace: sharedTunnel.Namespace}, &t)).To(Succeed())
-				if t.Annotations == nil {
-					t.Annotations = make(map[string]string)
-				}
-				t.Annotations["cfgate.io/test-concurrent"] = "tunnel-update"
-				Expect(k8sClient.Update(ctx, &t)).To(Succeed())
+				Eventually(func() error {
+					var t cfgatev1alpha1.CloudflareTunnel
+					if err := k8sClient.Get(ctx, client.ObjectKey{Name: sharedTunnel.Name, Namespace: sharedTunnel.Namespace}, &t); err != nil {
+						return err
+					}
+					if t.Annotations == nil {
+						t.Annotations = make(map[string]string)
+					}
+					t.Annotations["cfgate.io/test-concurrent"] = "tunnel-update"
+					return k8sClient.Update(ctx, &t)
+				}, 30*time.Second, 1*time.Second).Should(Succeed())
 			}()
 
-			// Update route
+			// Update route (retry on conflict — controller may update status concurrently)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				defer GinkgoRecover()
 
-				var r gatewayv1.HTTPRoute
-				Expect(k8sClient.Get(ctx, client.ObjectKey{Name: routeName, Namespace: namespace.Name}, &r)).To(Succeed())
-				if r.Annotations == nil {
-					r.Annotations = make(map[string]string)
-				}
-				r.Annotations["cfgate.io/test-concurrent"] = "route-update"
-				Expect(k8sClient.Update(ctx, &r)).To(Succeed())
+				Eventually(func() error {
+					var r gatewayv1.HTTPRoute
+					if err := k8sClient.Get(ctx, client.ObjectKey{Name: routeName, Namespace: namespace.Name}, &r); err != nil {
+						return err
+					}
+					if r.Annotations == nil {
+						r.Annotations = make(map[string]string)
+					}
+					r.Annotations["cfgate.io/test-concurrent"] = "route-update"
+					return k8sClient.Update(ctx, &r)
+				}, 30*time.Second, 1*time.Second).Should(Succeed())
 			}()
 
 			wg.Wait()
@@ -466,6 +474,169 @@ var _ = Describe("Multi-Resource E2E", Label("cloudflare"), Ordered, func() {
 				}
 				return false
 			}, DefaultTimeout, DefaultInterval).Should(BeTrue(), "Tunnel should remain ready")
+		})
+	})
+
+	// ============================================================
+	// §6.5: Cleanup Verification (No Orphaned CF Resources)
+	// ============================================================
+	Context("cleanup verification", func() {
+		It("should clean up all Cloudflare resources when namespace is deleted", SpecTimeout(8*time.Minute), func(ctx SpecContext) {
+			By("Creating a SEPARATE namespace for cleanup test")
+			cleanupNS := createTestNamespace("cfgate-cleanup-e2e")
+			createCloudflareCredentialsSecret(cleanupNS.Name)
+
+			By("Creating tunnel in cleanup namespace")
+			tunnelName := testID("cleanup-tunnel")
+			tunnel := createCloudflareTunnel(ctx, k8sClient, testID("cleanup-t"), cleanupNS.Name, tunnelName)
+			tunnel = waitForTunnelReady(ctx, k8sClient, tunnel.Name, cleanupNS.Name, DefaultTimeout)
+			tunnelID := tunnel.Status.TunnelID
+			Expect(tunnelID).NotTo(BeEmpty())
+
+			By("Creating DNS in cleanup namespace")
+			hostname := fmt.Sprintf("%s.%s", testID("cleanup-dns"), testEnv.CloudflareZoneName)
+			dnsResource := &cfgatev1alpha1.CloudflareDNS{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testID("cleanup-d"),
+					Namespace: cleanupNS.Name,
+				},
+				Spec: cfgatev1alpha1.CloudflareDNSSpec{
+					TunnelRef: &cfgatev1alpha1.DNSTunnelRef{
+						Name: tunnel.Name,
+					},
+					Zones: []cfgatev1alpha1.DNSZoneConfig{
+						{Name: testEnv.CloudflareZoneName},
+					},
+					Policy: cfgatev1alpha1.DNSPolicySync,
+					Source: cfgatev1alpha1.DNSHostnameSource{
+						Explicit: []cfgatev1alpha1.DNSExplicitHostname{
+							{Hostname: hostname},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, dnsResource)).To(Succeed())
+
+			By("Creating Access policy in cleanup namespace")
+			cleanupGCName := testID("cleanup-gc")
+			createGatewayClass(ctx, k8sClient, cleanupGCName)
+			cleanupGW := createGateway(ctx, k8sClient, testID("cleanup-gw"), cleanupNS.Name, cleanupGCName, "")
+			cleanupSvc := createTestService(ctx, k8sClient, testID("cleanup-svc"), cleanupNS.Name, 8080)
+			cleanupRouteName := testID("cleanup-route")
+			createHTTPRoute(ctx, k8sClient, cleanupRouteName, cleanupNS.Name, cleanupGW.Name, []string{hostname}, cleanupSvc.Name, 8080)
+
+			policyName := testID("cleanup-policy")
+			policy := createCloudflareAccessPolicy(ctx, k8sClient, policyName, cleanupNS.Name, cleanupRouteName, hostname)
+
+			By("Waiting for all resources to be ready")
+			waitForAccessPolicyReady(ctx, k8sClient, policy.Name, cleanupNS.Name, DefaultTimeout)
+			Eventually(func() bool {
+				record, err := getDNSRecordFromCloudflare(ctx, cfClient, zoneID, hostname, "CNAME")
+				return err == nil && record != nil
+			}, DefaultTimeout, DefaultInterval).Should(BeTrue(), "DNS record should exist")
+
+			By("Recording CF resource IDs")
+			cfApp, err := getAccessApplicationFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, policyName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfApp).NotTo(BeNil())
+			appID := cfApp.ID
+
+			By("Deleting the cleanup namespace")
+			deleteTestNamespace(cleanupNS)
+
+			By("Verifying via CF API: tunnel is deleted (deleted_at set or 404)")
+			Eventually(func() bool {
+				t, err := getTunnelByIDFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, tunnelID)
+				if err != nil {
+					return false
+				}
+				// Tunnel should be nil (404/not found) or have deleted_at set.
+				// Note: CF API status enum is {inactive,degraded,healthy,down} — there is no
+				// "deleted" status. Deletion is indicated by a non-zero deleted_at timestamp.
+				return t == nil || !t.DeletedAt.IsZero()
+			}, DefaultTimeout, DefaultInterval).Should(BeTrue(),
+				"Tunnel should be deleted from Cloudflare after namespace deletion")
+
+			By("Verifying via CF API: DNS records gone")
+			Eventually(func() bool {
+				record, err := getDNSRecordFromCloudflare(ctx, cfClient, zoneID, hostname, "CNAME")
+				return err == nil && record == nil
+			}, DefaultTimeout, DefaultInterval).Should(BeTrue(),
+				"DNS record should be deleted from Cloudflare after namespace deletion")
+
+			By("Verifying via CF API: Access application gone")
+			Eventually(func() bool {
+				app, err := getAccessApplicationByIDFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, appID)
+				if err != nil {
+					return false
+				}
+				return app == nil
+			}, DefaultTimeout, DefaultInterval).Should(BeTrue(),
+				"Access application should be deleted from Cloudflare after namespace deletion")
+		})
+	})
+
+	// ============================================================
+	// §6.6: Concurrent CR Creation (Stress/Race Detection)
+	// ============================================================
+	Context("concurrent CR creation", func() {
+		It("should handle concurrent CR creation without duplicates", SpecTimeout(10*time.Minute), func(ctx SpecContext) {
+			const numTunnels = 3
+
+			By("Creating 3 CloudflareTunnel CRs simultaneously")
+			tunnelNames := make([]string, numTunnels)
+			crNames := make([]string, numTunnels)
+			for i := 0; i < numTunnels; i++ {
+				tunnelNames[i] = fmt.Sprintf("%s-%d", testID("concurrent-t"), i)
+				crNames[i] = fmt.Sprintf("%s-%d", testID("concurrent-cr"), i)
+			}
+
+			var wg sync.WaitGroup
+			for i := 0; i < numTunnels; i++ {
+				wg.Add(1)
+				go func(idx int) {
+					defer wg.Done()
+					defer GinkgoRecover()
+
+					createCloudflareTunnel(ctx, k8sClient, crNames[idx], namespace.Name, tunnelNames[idx])
+				}(i)
+			}
+			wg.Wait()
+
+			By("Waiting for all 3 tunnels to become ready")
+			tunnelIDs := make([]string, numTunnels)
+			for i := 0; i < numTunnels; i++ {
+				tunnel := waitForTunnelReady(ctx, k8sClient, crNames[i], namespace.Name, DefaultTimeout)
+				tunnelIDs[i] = tunnel.Status.TunnelID
+				Expect(tunnelIDs[i]).NotTo(BeEmpty(), "Tunnel %d should have a tunnel ID", i)
+			}
+
+			By("Verifying each CR's status.tunnelID is unique")
+			uniqueIDs := make(map[string]bool)
+			for i, id := range tunnelIDs {
+				Expect(uniqueIDs).NotTo(HaveKey(id),
+					"Tunnel ID %s is duplicated (tunnel %d)", id, i)
+				uniqueIDs[id] = true
+			}
+
+			By("Listing all tunnels in CF API matching the test prefix")
+			prefix := testID("concurrent-t")
+			cfTunnels, err := listTunnelsByPrefixFromCloudflare(ctx, cfClient, testEnv.CloudflareAccountID, prefix)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying exactly 3 tunnels exist (no duplicates)")
+			Expect(cfTunnels).To(HaveLen(numTunnels),
+				"Should have exactly %d tunnels in CF, got %d (possible duplicates)", numTunnels, len(cfTunnels))
+
+			By("Verifying tunnel names match what we created")
+			cfNames := make(map[string]bool)
+			for _, t := range cfTunnels {
+				cfNames[t.Name] = true
+			}
+			for _, name := range tunnelNames {
+				Expect(cfNames).To(HaveKey(name),
+					"CF should have tunnel named %s", name)
+			}
 		})
 	})
 

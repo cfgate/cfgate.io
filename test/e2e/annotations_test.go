@@ -74,17 +74,16 @@ var _ = Describe("HTTPRoute Annotations E2E", Ordered, func() {
 			[]string{testEnv.CloudflareZoneName},
 			"cfgate.io/dns-sync=enabled")
 		_ = sharedDNS // suppress unused warning, used implicitly via controller
-	})
 
-	AfterAll(func() {
-		if testEnv.SkipCleanup {
-			return
-		}
-
-		// Delete namespace - controller finalizers will handle Cloudflare cleanup
-		if namespace != nil {
-			deleteTestNamespace(namespace)
-		}
+		// Register cleanup via DeferCleanup (Ginkgo #1284: use in BeforeAll, not AfterAll).
+		DeferCleanup(func() {
+			if testEnv.SkipCleanup {
+				return
+			}
+			if namespace != nil {
+				deleteTestNamespace(namespace)
+			}
+		})
 	})
 
 	Context("origin configuration", func() {
