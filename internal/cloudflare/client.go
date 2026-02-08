@@ -52,6 +52,9 @@ type Client interface {
 	// ListDNSRecords lists all DNS records in a zone.
 	ListDNSRecords(ctx context.Context, zoneID string) ([]DNSRecord, error)
 
+	// ListDNSRecordsByNameType lists DNS records filtered by exact name and record type.
+	ListDNSRecordsByNameType(ctx context.Context, zoneID, name, recordType string) ([]DNSRecord, error)
+
 	// CreateDNSRecord creates a new DNS record.
 	CreateDNSRecord(ctx context.Context, zoneID string, record DNSRecord) (*DNSRecord, error)
 

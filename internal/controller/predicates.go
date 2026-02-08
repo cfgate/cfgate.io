@@ -49,6 +49,35 @@ var CfgateAnnotationOrGenerationPredicate = predicate.Or(
 	},
 )
 
+// GenerationOrDeletionPredicate passes events when:
+//  1. metadata.generation changed (spec change), OR
+//  2. DeletionTimestamp was just set (object marked for deletion)
+//
+// This replaces GenerationChangedPredicate on For() clauses for CRDs that use
+// finalizers. Without this, setting DeletionTimestamp (which does NOT increment
+// generation) produces an Update event that GenerationChangedPredicate filters.
+// The reconciler never sees the deletion until a stale RequeueAfter timer fires
+// — potentially minutes later — causing delayed or failed cleanup.
+var GenerationOrDeletionPredicate = predicate.Or(
+	predicate.GenerationChangedPredicate{},
+	predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return false
+			}
+			// Pass if DeletionTimestamp was just set.
+			if e.ObjectOld.GetDeletionTimestamp() == nil && e.ObjectNew.GetDeletionTimestamp() != nil {
+				predicateLog.V(1).Info("deletion timestamp detected",
+					"namespace", e.ObjectNew.GetNamespace(),
+					"name", e.ObjectNew.GetName(),
+				)
+				return true
+			}
+			return false
+		},
+	},
+)
+
 // cfgateAnnotationsChanged returns true if any cfgate.io/* prefixed annotation
 // was added, removed, or had its value changed between old and new.
 func cfgateAnnotationsChanged(old, new map[string]string) bool {

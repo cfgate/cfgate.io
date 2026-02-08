@@ -46,6 +46,9 @@ const (
 
 	// AccessPolicyControllerName is the controller name for policy status.
 	AccessPolicyControllerName = "cfgate.io/cloudflare-tunnel-controller"
+
+	// accessPolicyTargetIndex is the field index key for target lookups.
+	accessPolicyTargetIndex = ".spec.targetRefs"
 )
 
 // CloudflareAccessPolicyReconciler reconciles CloudflareAccessPolicy resources.
@@ -1282,6 +1285,35 @@ func (r *CloudflareAccessPolicyReconciler) createClientFromSecret(secret *corev1
 	return cloudflare.NewClient(string(token))
 }
 
+// accessPolicyTargetKey builds an index key for a target reference.
+func accessPolicyTargetKey(kind, namespace, name string) string {
+	return kind + "/" + namespace + "/" + name
+}
+
+// accessPolicyTargetIndexFunc extracts index keys from a CloudflareAccessPolicy.
+// Each key encodes Kind/Namespace/Name for all targetRef and targetRefs entries.
+func accessPolicyTargetIndexFunc(obj client.Object) []string {
+	policy, ok := obj.(*cfgatev1alpha1.CloudflareAccessPolicy)
+	if !ok {
+		return nil
+	}
+
+	var keys []string
+	refs := policy.Spec.TargetRefs
+	if policy.Spec.TargetRef != nil {
+		refs = append([]cfgatev1alpha1.PolicyTargetReference{*policy.Spec.TargetRef}, refs...)
+	}
+
+	for _, ref := range refs {
+		ns := policy.Namespace
+		if ref.Namespace != nil {
+			ns = *ref.Namespace
+		}
+		keys = append(keys, accessPolicyTargetKey(ref.Kind, ns, ref.Name))
+	}
+	return keys
+}
+
 // SetupWithManager sets up the controller with the Manager.
 //
 // Watched resources:
@@ -1298,9 +1330,19 @@ func (r *CloudflareAccessPolicyReconciler) createClientFromSecret(secret *corev1
 func (r *CloudflareAccessPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	log := mgr.GetLogger().WithName("controller").WithName("accesspolicy")
 	log.Info("registering controller with manager")
+
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&cfgatev1alpha1.CloudflareAccessPolicy{},
+		accessPolicyTargetIndex,
+		accessPolicyTargetIndexFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create target index: %w", err)
+	}
+
 	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&cfgatev1alpha1.CloudflareAccessPolicy{},
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+			builder.WithPredicates(GenerationOrDeletionPredicate),
 		).
 		Owns(&corev1.Secret{}). // Service token secrets
 		Watches(
@@ -1369,52 +1411,25 @@ func (r *CloudflareAccessPolicyReconciler) findPoliciesForUDPRoute(ctx context.C
 }
 
 // findPoliciesForTarget finds all CloudflareAccessPolicies targeting a specific object.
-// It lists all policies and checks their targetRef/targetRefs for matches by kind,
-// name, and namespace.
+// Uses the field indexer to efficiently look up policies by target Kind/Namespace/Name.
 func (r *CloudflareAccessPolicyReconciler) findPoliciesForTarget(ctx context.Context, kind string, obj client.Object) []reconcile.Request {
 	log := log.FromContext(ctx)
 
-	// List all CloudflareAccessPolicies
 	var policies cfgatev1alpha1.CloudflareAccessPolicyList
-	if err := r.List(ctx, &policies); err != nil {
-		log.Error(err, "failed to list CloudflareAccessPolicies")
+	key := accessPolicyTargetKey(kind, obj.GetNamespace(), obj.GetName())
+	if err := r.List(ctx, &policies, client.MatchingFields{accessPolicyTargetIndex: key}); err != nil {
+		log.Error(err, "failed to list CloudflareAccessPolicies by index")
 		return nil
 	}
 
 	var requests []reconcile.Request
 	for _, policy := range policies.Items {
-		// Check if policy targets this object
-		refs := policy.Spec.TargetRefs
-		if policy.Spec.TargetRef != nil {
-			refs = append([]cfgatev1alpha1.PolicyTargetReference{*policy.Spec.TargetRef}, refs...)
-		}
-
-		for _, ref := range refs {
-			if ref.Kind != kind {
-				continue
-			}
-			if ref.Name != obj.GetName() {
-				continue
-			}
-
-			// Check namespace
-			targetNS := policy.Namespace
-			if ref.Namespace != nil {
-				targetNS = *ref.Namespace
-			}
-			if targetNS != obj.GetNamespace() {
-				continue
-			}
-
-			// Match found
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Namespace: policy.Namespace,
-					Name:      policy.Name,
-				},
-			})
-			break
-		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: policy.Namespace,
+				Name:      policy.Name,
+			},
+		})
 	}
 
 	if len(requests) > 0 {

@@ -35,7 +35,36 @@ const (
 
 	// defaultOwnershipPrefix is the default prefix for TXT ownership records.
 	dnsDefaultOwnershipPrefix = "_cfgate"
+
+	// dnsTunnelRefNameIndex is the field indexer key for CloudflareDNS spec.tunnelRef.name.
+	dnsTunnelRefNameIndex = "spec.tunnelRef.name"
+
+	// dnsGatewayRoutesEnabledIndex is the field indexer key for CloudflareDNS spec.source.gatewayRoutes.enabled.
+	dnsGatewayRoutesEnabledIndex = "spec.source.gatewayRoutes.enabled"
 )
+
+func extractDNSTunnelRefName(obj client.Object) []string {
+	dns, ok := obj.(*cfgatev1alpha1.CloudflareDNS)
+	if !ok || dns.Spec.TunnelRef == nil {
+		return nil
+	}
+	ns := dns.Spec.TunnelRef.Namespace
+	if ns == "" {
+		ns = dns.Namespace
+	}
+	return []string{ns + "/" + dns.Spec.TunnelRef.Name}
+}
+
+func extractDNSGatewayRoutesEnabled(obj client.Object) []string {
+	dns, ok := obj.(*cfgatev1alpha1.CloudflareDNS)
+	if !ok {
+		return nil
+	}
+	if dns.Spec.Source.GatewayRoutes.Enabled {
+		return []string{"true"}
+	}
+	return nil
+}
 
 // HostnameConfig holds per-hostname DNS configuration from route annotations,
 // passing TTL and Proxied settings from HTTPRoute annotations to syncRecords.
@@ -156,7 +185,7 @@ func (r *CloudflareDNSReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	r.setCondition(&dns, status.ConditionTypeCredentialsValid, metav1.ConditionTrue, status.ReasonCredentialsValid, "Credentials are valid")
 
-	dnsService := cloudflare.NewDNSService(cfClient, logger)
+	dnsService := cloudflare.NewDNSService(cfClient, logger).WithCache(cloudflare.NewDNSRecordCache())
 
 	// 6. Resolve zones
 	zones, err := r.resolveZones(ctx, &dns, dnsService)
@@ -223,9 +252,18 @@ func (r *CloudflareDNSReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 func (r *CloudflareDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	log := mgr.GetLogger().WithName("controller").WithName("dns")
 	log.Info("registering controller with manager")
+
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &cfgatev1alpha1.CloudflareDNS{}, dnsTunnelRefNameIndex, extractDNSTunnelRefName); err != nil {
+		return fmt.Errorf("failed to create tunnelRef.name index: %w", err)
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &cfgatev1alpha1.CloudflareDNS{}, dnsGatewayRoutesEnabledIndex, extractDNSGatewayRoutesEnabled); err != nil {
+		return fmt.Errorf("failed to create gatewayRoutes.enabled index: %w", err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cfgatev1alpha1.CloudflareDNS{},
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+			builder.WithPredicates(GenerationOrDeletionPredicate),
 		).
 		Watches(
 			&cfgatev1alpha1.CloudflareTunnel{},
@@ -246,7 +284,7 @@ func (r *CloudflareDNSReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // findAffectedDNSByTunnel finds all CloudflareDNS resources that reference
-// the given CloudflareTunnel via spec.tunnelRef.
+// the given CloudflareTunnel via spec.tunnelRef using a field index.
 func (r *CloudflareDNSReconciler) findAffectedDNSByTunnel(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
@@ -255,32 +293,22 @@ func (r *CloudflareDNSReconciler) findAffectedDNSByTunnel(ctx context.Context, o
 		return nil
 	}
 
-	// List all CloudflareDNS resources
 	var dnsList cfgatev1alpha1.CloudflareDNSList
-	if err := r.List(ctx, &dnsList); err != nil {
-		logger.Error(err, "failed to list CloudflareDNS resources")
+	if err := r.List(ctx, &dnsList, client.MatchingFields{
+		dnsTunnelRefNameIndex: tunnel.Namespace + "/" + tunnel.Name,
+	}); err != nil {
+		logger.Error(err, "failed to list CloudflareDNS resources by tunnel index")
 		return nil
 	}
 
-	var requests []reconcile.Request
+	requests := make([]reconcile.Request, 0, len(dnsList.Items))
 	for _, dns := range dnsList.Items {
-		if dns.Spec.TunnelRef != nil {
-			// Resolve namespace
-			tunnelNamespace := dns.Spec.TunnelRef.Namespace
-			if tunnelNamespace == "" {
-				tunnelNamespace = dns.Namespace
-			}
-
-			// Check if this DNS references the changed tunnel
-			if dns.Spec.TunnelRef.Name == tunnel.Name && tunnelNamespace == tunnel.Namespace {
-				requests = append(requests, reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Name:      dns.Name,
-						Namespace: dns.Namespace,
-					},
-				})
-			}
-		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      dns.Name,
+				Namespace: dns.Namespace,
+			},
+		})
 	}
 
 	if len(requests) > 0 {
@@ -294,27 +322,26 @@ func (r *CloudflareDNSReconciler) findAffectedDNSByTunnel(ctx context.Context, o
 }
 
 // findAffectedDNSByRoute finds all CloudflareDNS resources that may be affected
-// by a change to an HTTPRoute.
+// by a change to an HTTPRoute using a field index on gatewayRoutes.enabled.
 func (r *CloudflareDNSReconciler) findAffectedDNSByRoute(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
-	// List all CloudflareDNS resources with gatewayRoutes enabled
 	var dnsList cfgatev1alpha1.CloudflareDNSList
-	if err := r.List(ctx, &dnsList); err != nil {
-		logger.Error(err, "failed to list CloudflareDNS resources")
+	if err := r.List(ctx, &dnsList, client.MatchingFields{
+		dnsGatewayRoutesEnabledIndex: "true",
+	}); err != nil {
+		logger.Error(err, "failed to list CloudflareDNS resources by gateway routes index")
 		return nil
 	}
 
-	var requests []reconcile.Request
+	requests := make([]reconcile.Request, 0, len(dnsList.Items))
 	for _, dns := range dnsList.Items {
-		if dns.Spec.Source.GatewayRoutes.Enabled {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      dns.Name,
-					Namespace: dns.Namespace,
-				},
-			})
-		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      dns.Name,
+				Namespace: dns.Namespace,
+			},
+		})
 	}
 
 	if len(requests) > 0 {
@@ -328,27 +355,26 @@ func (r *CloudflareDNSReconciler) findAffectedDNSByRoute(ctx context.Context, ob
 }
 
 // findAffectedDNSByGateway finds all CloudflareDNS resources that may be affected
-// by a change to a Gateway.
+// by a change to a Gateway using a field index on gatewayRoutes.enabled.
 func (r *CloudflareDNSReconciler) findAffectedDNSByGateway(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx).WithName("controller").WithName("dns")
 
-	// List all CloudflareDNS resources with gatewayRoutes enabled
 	var dnsList cfgatev1alpha1.CloudflareDNSList
-	if err := r.List(ctx, &dnsList); err != nil {
-		logger.Error(err, "failed to list CloudflareDNS resources")
+	if err := r.List(ctx, &dnsList, client.MatchingFields{
+		dnsGatewayRoutesEnabledIndex: "true",
+	}); err != nil {
+		logger.Error(err, "failed to list CloudflareDNS resources by gateway routes index")
 		return nil
 	}
 
-	var requests []reconcile.Request
+	requests := make([]reconcile.Request, 0, len(dnsList.Items))
 	for _, dns := range dnsList.Items {
-		if dns.Spec.Source.GatewayRoutes.Enabled {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      dns.Name,
-					Namespace: dns.Namespace,
-				},
-			})
-		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      dns.Name,
+				Namespace: dns.Namespace,
+			},
+		})
 	}
 
 	if len(requests) > 0 {

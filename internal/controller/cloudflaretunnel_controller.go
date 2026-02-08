@@ -2,7 +2,10 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -54,6 +57,17 @@ const (
 
 	// requeueAfterSuccess is the requeue delay for periodic sync.
 	requeueAfterSuccess = 5 * time.Minute
+
+	// deletionRetryBudget is the maximum time to retry CF tunnel deletion before
+	// falling through to finalizer removal. This prevents K8s object deletion
+	// from blocking indefinitely when CF API is unavailable (e.g., rate limited).
+	// Consistent with DNS/Access controllers which never block finalizer removal.
+	// 2 minutes handles cloudflared connection drain (~30s) with generous margin.
+	deletionRetryBudget = 2 * time.Minute
+
+	// configHashAnnotation stores a SHA-256 hash of the last-synced tunnel
+	// configuration, enabling the config diff gate to skip redundant API updates.
+	configHashAnnotation = "cfgate.io/config-hash"
 )
 
 // CloudflareTunnelReconciler reconciles a CloudflareTunnel object.
@@ -132,17 +146,44 @@ func (r *CloudflareTunnelReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// ObservedGeneration guard: skip full reconcile when spec unchanged and tunnel healthy.
-	// The controller's RequeueAfter (5m) triggers periodic reconciliation. Without this guard,
-	// every requeue performs ~5 Cloudflare API calls even when nothing changed.
-	// The 30m safety net ensures periodic full reconciliation to catch external state drift.
-	if tunnel.Generation == tunnel.Status.ObservedGeneration &&
+	tunnelLifecycleUnchanged := tunnel.Generation == tunnel.Status.ObservedGeneration &&
 		isTunnelHealthy(&tunnel) &&
 		tunnel.Status.LastSyncTime != nil &&
-		time.Since(tunnel.Status.LastSyncTime.Time) < 30*time.Minute {
-		log.V(1).Info("skipping reconciliation, generation unchanged and tunnel healthy",
+		time.Since(tunnel.Status.LastSyncTime.Time) < 30*time.Minute
+
+	if tunnelLifecycleUnchanged {
+		log.V(1).Info("tunnel lifecycle unchanged, skipping credential/tunnel/deployment checks",
 			"generation", tunnel.Generation,
 			"lastSync", tunnel.Status.LastSyncTime.Time)
+
+		deploymentName := cloudflared.DeploymentName(tunnel.Name)
+		var deployment appsv1.Deployment
+		if err := r.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: tunnel.Namespace}, &deployment); err == nil {
+			if deployment.Status.ReadyReplicas != tunnel.Status.ReadyReplicas ||
+				deployment.Status.Replicas != tunnel.Status.Replicas {
+				tunnel.Status.ReadyReplicas = deployment.Status.ReadyReplicas
+				tunnel.Status.Replicas = deployment.Status.Replicas
+			}
+		}
+
+		syncErr := r.syncConfiguration(ctx, &tunnel)
+		if syncErr != nil {
+			log.Error(syncErr, "failed to sync configuration in guard path")
+			r.setCondition(&tunnel, ConditionTypeConfigurationSynced, metav1.ConditionFalse, "ConfigSyncError", syncErr.Error())
+		} else {
+			r.setCondition(&tunnel, ConditionTypeConfigurationSynced, metav1.ConditionTrue, "ConfigurationSynced",
+				fmt.Sprintf("Configuration synced with %d ingress rules", tunnel.Status.ConnectedRouteCount))
+		}
+
+		now := metav1.Now()
+		tunnel.Status.LastSyncTime = &now
+		if err := r.updateStatus(ctx, &tunnel); err != nil {
+			log.Error(err, "failed to update status in guard path")
+			return ctrl.Result{RequeueAfter: requeueAfterError}, nil
+		}
+		if syncErr != nil {
+			return ctrl.Result{RequeueAfter: requeueAfterError}, nil
+		}
 		return ctrl.Result{RequeueAfter: requeueAfterSuccess}, nil
 	}
 
@@ -234,7 +275,7 @@ func (r *CloudflareTunnelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cfgatev1alpha1.CloudflareTunnel{},
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+			builder.WithPredicates(GenerationOrDeletionPredicate),
 		).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Secret{}).
@@ -431,9 +472,13 @@ func (r *CloudflareTunnelReconciler) deployCloudflared(ctx context.Context, tunn
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if err := r.Create(ctx, secret); err != nil {
-				return fmt.Errorf("failed to create token secret: %w", err)
+				if !apierrors.IsAlreadyExists(err) {
+					return fmt.Errorf("failed to create token secret: %w", err)
+				}
+				// Already exists from concurrent reconcile, continue
+			} else {
+				log.Info("Created token secret", "name", secret.Name)
 			}
-			log.Info("Created token secret", "name", secret.Name)
 		} else {
 			return fmt.Errorf("failed to get token secret: %w", err)
 		}
@@ -456,10 +501,14 @@ func (r *CloudflareTunnelReconciler) deployCloudflared(ctx context.Context, tunn
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if err := r.Create(ctx, deployment); err != nil {
-				return fmt.Errorf("failed to create deployment: %w", err)
+				if !apierrors.IsAlreadyExists(err) {
+					return fmt.Errorf("failed to create deployment: %w", err)
+				}
+				// Already exists from concurrent reconcile, continue
+			} else {
+				log.Info("Created cloudflared deployment", "name", deployment.Name)
+				r.Recorder.Eventf(tunnel, nil, corev1.EventTypeNormal, "DeploymentCreated", "Create", "Created cloudflared deployment %s", deployment.Name)
 			}
-			log.Info("Created cloudflared deployment", "name", deployment.Name)
-			r.Recorder.Eventf(tunnel, nil, corev1.EventTypeNormal, "DeploymentCreated", "Create", "Created cloudflared deployment %s", deployment.Name)
 		} else {
 			return fmt.Errorf("failed to get deployment: %w", err)
 		}
@@ -536,9 +585,16 @@ func (r *CloudflareTunnelReconciler) syncConfiguration(ctx context.Context, tunn
 		return fmt.Errorf("failed to resolve account: %w", err)
 	}
 
+	desiredHash := tunnelConfigHash(config)
+	currentHash := tunnel.Annotations[configHashAnnotation]
+	if desiredHash == currentHash {
+		log.V(1).Info("tunnel configuration unchanged, skipping update",
+			"tunnelID", tunnel.Status.TunnelID)
+		tunnel.Status.ConnectedRouteCount = int32(routeCount)
+		return nil
+	}
+
 	if err := tunnelService.UpdateConfiguration(ctx, accountID, tunnel.Status.TunnelID, config); err != nil {
-		// Check for 404 - tunnel not found on Cloudflare side
-		// This can happen if the tunnel was deleted externally; clear status to force re-adoption
 		errStr := err.Error()
 		if strings.Contains(errStr, "404") || strings.Contains(errStr, "not found") || strings.Contains(errStr, "Tunnel not found") {
 			log.Info("Tunnel not found on Cloudflare, clearing tunnelID to force re-adoption", "tunnelID", tunnel.Status.TunnelID)
@@ -548,9 +604,17 @@ func (r *CloudflareTunnelReconciler) syncConfiguration(ctx context.Context, tunn
 			if statusErr := r.Status().Update(ctx, tunnel); statusErr != nil {
 				log.Error(statusErr, "failed to clear stale tunnelID from status")
 			}
-			// Return the original error to trigger requeue, which will re-adopt/create the tunnel
 		}
 		return fmt.Errorf("failed to update tunnel configuration: %w", err)
+	}
+
+	patch := client.MergeFrom(tunnel.DeepCopy())
+	if tunnel.Annotations == nil {
+		tunnel.Annotations = make(map[string]string)
+	}
+	tunnel.Annotations[configHashAnnotation] = desiredHash
+	if err := r.Patch(ctx, tunnel, patch); err != nil {
+		log.Error(err, "failed to store config hash annotation")
 	}
 
 	tunnel.Status.ConnectedRouteCount = int32(routeCount)
@@ -697,9 +761,24 @@ func (r *CloudflareTunnelReconciler) reconcileDelete(ctx context.Context, tunnel
 				r.Recorder.Eventf(tunnel, nil, corev1.EventTypeWarning, "TunnelOrphanedNoAccountID", "Delete",
 					"Tunnel %s may be orphaned on Cloudflare: no account ID", tunnel.Status.TunnelID)
 			} else if err := tunnelService.Delete(ctx, accountID, tunnel.Status.TunnelID); err != nil {
-				log.Error(err, "failed to delete tunnel from Cloudflare")
-				r.Recorder.Eventf(tunnel, nil, corev1.EventTypeWarning, "TunnelDeleteError", "Delete", "%s", err.Error())
-				// Continue with finalizer removal
+				retryElapsed := time.Since(tunnel.DeletionTimestamp.Time)
+				if retryElapsed < deletionRetryBudget {
+					log.Error(err, "failed to delete tunnel from Cloudflare, will retry",
+						"retryElapsed", retryElapsed.Round(time.Second),
+						"retryBudget", deletionRetryBudget)
+					r.Recorder.Eventf(tunnel, nil, corev1.EventTypeWarning, "TunnelDeleteError", "Delete", "%s", err.Error())
+					// Requeue to retry — cloudflared pods may still have active connections.
+					// Once connections drain, the delete will succeed.
+					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				}
+				// Retry budget exhausted — fall through to finalizer removal.
+				// Tunnel may be orphaned on Cloudflare; emit warning for observability.
+				log.Error(err, "retry budget exhausted, proceeding with finalizer removal — tunnel may be orphaned",
+					"retryElapsed", retryElapsed.Round(time.Second),
+					"tunnelID", tunnel.Status.TunnelID)
+				r.Recorder.Eventf(tunnel, nil, corev1.EventTypeWarning, "TunnelOrphanedDeleteFailed", "Delete",
+					"Tunnel %s may be orphaned on Cloudflare after %s of retries: %v",
+					tunnel.Status.TunnelID, retryElapsed.Round(time.Second), err)
 			} else {
 				log.Info("Deleted tunnel from Cloudflare", "tunnelID", tunnel.Status.TunnelID)
 				r.Recorder.Eventf(tunnel, nil, corev1.EventTypeNormal, "TunnelDeleted", "Delete", "Deleted tunnel %s from Cloudflare", tunnel.Status.TunnelID)
@@ -720,9 +799,11 @@ func (r *CloudflareTunnelReconciler) reconcileDelete(ctx context.Context, tunnel
 // updateStatus updates the CloudflareTunnel status, re-fetching the resource
 // first to avoid update conflicts from concurrent modifications.
 func (r *CloudflareTunnelReconciler) updateStatus(ctx context.Context, tunnel *cfgatev1alpha1.CloudflareTunnel) error {
-	// Re-fetch to avoid conflicts
+	// Use APIReader (direct API server read) to avoid stale informer cache.
+	// syncConfiguration patches annotations which bumps ResourceVersion; the
+	// informer cache may not reflect this yet, causing 409 Conflict on Status().Update.
 	var current cfgatev1alpha1.CloudflareTunnel
-	if err := r.Get(ctx, types.NamespacedName{Name: tunnel.Name, Namespace: tunnel.Namespace}, &current); err != nil {
+	if err := r.APIReader.Get(ctx, types.NamespacedName{Name: tunnel.Name, Namespace: tunnel.Namespace}, &current); err != nil {
 		return fmt.Errorf("failed to re-fetch tunnel: %w", err)
 	}
 
@@ -922,4 +1003,26 @@ func (r *CloudflareTunnelReconciler) setCondition(tunnel *cfgatev1alpha1.Cloudfl
 	}
 
 	meta.SetStatusCondition(&tunnel.Status.Conditions, condition)
+}
+
+// tunnelConfigHash produces a deterministic SHA-256 hex digest of a TunnelConfiguration.
+// Ingress rules are sorted by hostname then service before hashing so that
+// rule collection order does not cause spurious config updates.
+func tunnelConfigHash(config cloudflare.TunnelConfiguration) string {
+	canonical := make([]cloudflare.IngressRule, len(config.Ingress))
+	copy(canonical, config.Ingress)
+	sort.Slice(canonical, func(i, j int) bool {
+		if canonical[i].Hostname != canonical[j].Hostname {
+			return canonical[i].Hostname < canonical[j].Hostname
+		}
+		return canonical[i].Service < canonical[j].Service
+	})
+	normalized := cloudflare.TunnelConfiguration{
+		Ingress:       canonical,
+		OriginRequest: config.OriginRequest,
+		WarpRouting:   config.WarpRouting,
+	}
+	data, _ := json.Marshal(normalized)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum)
 }

@@ -605,30 +605,60 @@ type CertificateSettingsParam struct {
 }
 
 // EnsureApplication ensures an application exists with the given configuration.
-// If an application with the domain exists, it is adopted. Otherwise, a new application is created.
-// Returns the application and whether it was created (vs adopted).
+// If an application with the name exists, it is adopted and updated if managed fields
+// have drifted. Otherwise, a new application is created.
+// Returns the application and whether it was created (vs adopted/updated).
 func (s *AccessService) EnsureApplication(ctx context.Context, accountID string, params CreateApplicationParams) (*AccessApplication, bool, error) {
 	s.log.Info("ensuring access application exists",
 		"accountID", accountID,
 		"domain", params.Domain,
 	)
 
-	// Try to find existing application by name
 	existing, err := s.client.GetAccessApplicationByName(ctx, accountID, params.Name)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to check for existing application: %w", err)
 	}
 
-	// Application exists, adopt it
 	if existing != nil {
-		s.log.V(1).Info("access application already exists, adopting",
+		if accessApplicationNeedsUpdate(existing, &params) {
+			s.log.Info("access application drift detected, updating",
+				"applicationId", existing.ID,
+				"domain", existing.Domain,
+			)
+			updated, err := s.client.UpdateAccessApplication(ctx, accountID, existing.ID, UpdateApplicationParams{
+				Name:                        params.Name,
+				Domain:                      params.Domain,
+				SessionDuration:             params.SessionDuration,
+				AllowedIdps:                 params.AllowedIdps,
+				AutoRedirectToIdentity:      params.AutoRedirectToIdentity,
+				EnableBindingCookie:         params.EnableBindingCookie,
+				HttpOnlyCookieAttribute:     params.HttpOnlyCookieAttribute,
+				SameSiteCookieAttribute:     params.SameSiteCookieAttribute,
+				SkipInterstitial:            params.SkipInterstitial,
+				LogoURL:                     params.LogoURL,
+				AppLauncherVisible:          params.AppLauncherVisible,
+				CustomDenyMessage:           params.CustomDenyMessage,
+				CustomDenyURL:               params.CustomDenyURL,
+				CORSHeaders:                 params.CORSHeaders,
+				OptionsPreflightBypass:      params.OptionsPreflightBypass,
+				PathCookieAttribute:         params.PathCookieAttribute,
+				ServiceAuth401Redirect:      params.ServiceAuth401Redirect,
+				CustomNonIdentityDenyURL:    params.CustomNonIdentityDenyURL,
+				ReadServiceTokensFromHeader: params.ReadServiceTokensFromHeader,
+			})
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to update application: %w", err)
+			}
+			return updated, false, nil
+		}
+
+		s.log.V(1).Info("access application unchanged, adopting",
 			"applicationId", existing.ID,
 			"domain", existing.Domain,
 		)
 		return existing, false, nil
 	}
 
-	// Create new application
 	s.log.Info("creating new access application",
 		"accountID", accountID,
 		"domain", params.Domain,
@@ -641,6 +671,83 @@ func (s *AccessService) EnsureApplication(ctx context.Context, accountID string,
 	}
 
 	return app, true, nil
+}
+
+// accessApplicationNeedsUpdate compares an existing application against desired params.
+// Returns true if any managed field has drifted and an update is needed.
+func accessApplicationNeedsUpdate(existing *AccessApplication, desired *CreateApplicationParams) bool {
+	if existing.Name != desired.Name {
+		return true
+	}
+	if existing.Domain != desired.Domain {
+		return true
+	}
+	desiredSession := desired.SessionDuration
+	if desiredSession == "" {
+		desiredSession = "24h"
+	}
+	if existing.SessionDuration != desiredSession {
+		return true
+	}
+	if existing.SkipInterstitial != desired.SkipInterstitial {
+		return true
+	}
+	if existing.EnableBindingCookie != desired.EnableBindingCookie {
+		return true
+	}
+	if existing.AutoRedirectToIdentity != desired.AutoRedirectToIdentity {
+		return true
+	}
+	if existing.AppLauncherVisible != desired.AppLauncherVisible {
+		return true
+	}
+	if existing.LogoURL != desired.LogoURL {
+		return true
+	}
+	if existing.CustomDenyMessage != desired.CustomDenyMessage {
+		return true
+	}
+	if existing.CustomDenyURL != desired.CustomDenyURL {
+		return true
+	}
+	if existing.CustomNonIdentityDenyURL != desired.CustomNonIdentityDenyURL {
+		return true
+	}
+	if existing.OptionsPreflightBypass != desired.OptionsPreflightBypass {
+		return true
+	}
+	if existing.PathCookieAttribute != desired.PathCookieAttribute {
+		return true
+	}
+	if existing.ServiceAuth401Redirect != desired.ServiceAuth401Redirect {
+		return true
+	}
+	if existing.ReadServiceTokensFromHeader != desired.ReadServiceTokensFromHeader {
+		return true
+	}
+	desiredSameSite := desired.SameSiteCookieAttribute
+	if desiredSameSite == "" {
+		desiredSameSite = "lax"
+	}
+	if existing.SameSiteCookieAttribute != desiredSameSite {
+		return true
+	}
+	desiredHttpOnly := true
+	if desired.HttpOnlyCookieAttribute != nil {
+		desiredHttpOnly = *desired.HttpOnlyCookieAttribute
+	}
+	if existing.HttpOnlyCookieAttribute != desiredHttpOnly {
+		return true
+	}
+	if len(existing.AllowedIdps) != 0 || len(desired.AllowedIdps) != 0 {
+		if !reflect.DeepEqual(existing.AllowedIdps, desired.AllowedIdps) {
+			return true
+		}
+	}
+	if !reflect.DeepEqual(existing.CORSHeaders, desired.CORSHeaders) {
+		return true
+	}
+	return false
 }
 
 // SyncPolicies synchronizes access policies for an application.

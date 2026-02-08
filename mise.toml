@@ -92,9 +92,9 @@ env = { E2E_USE_EXISTING_CLUSTER = "true" }
 run = """
 echo "Running E2E tests against live Cloudflare API"
 mkdir -p out
-ginkgo -vv -p --keep-going --silence-skips --poll-progress-after=15s \
+ginkgo -vv --procs=${E2E_PROCS:-4} --keep-going --silence-skips --poll-progress-after=15s \
   --output-dir out \
-  --json-report=e2e-run.json \
+  --json-report=run.json \
   --cover --covermode atomic --coverprofile coverage.out \
   --race \
   ./test/e2e

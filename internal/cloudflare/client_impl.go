@@ -92,7 +92,7 @@ func (c *clientImpl) GetTunnelByName(ctx context.Context, accountID, name string
 	}
 
 	for _, tunnel := range tunnels.Result {
-		if tunnel.Name == name {
+		if tunnel.Name == name && string(tunnel.Status) != "deleted" {
 			return &Tunnel{
 				ID:         tunnel.ID,
 				Name:       tunnel.Name,
@@ -239,6 +239,39 @@ func (c *clientImpl) ListDNSRecords(ctx context.Context, zoneID string) ([]DNSRe
 
 	if err := page.Err(); err != nil {
 		return nil, fmt.Errorf("failed to list DNS records: %w", err)
+	}
+
+	return records, nil
+}
+
+// ListDNSRecordsByNameType lists DNS records filtered by exact name and record type.
+func (c *clientImpl) ListDNSRecordsByNameType(ctx context.Context, zoneID, name, recordType string) ([]DNSRecord, error) {
+	var records []DNSRecord
+
+	params := dns.RecordListParams{
+		ZoneID: cf.F(zoneID),
+		Name:   cf.F(dns.RecordListParamsName{Exact: cf.F(name)}),
+		Type:   cf.F(dns.RecordListParamsType(recordType)),
+	}
+
+	page := c.api.DNS.Records.ListAutoPaging(ctx, params)
+
+	for page.Next() {
+		record := page.Current()
+		records = append(records, DNSRecord{
+			ID:      record.ID,
+			Type:    string(record.Type),
+			Name:    record.Name,
+			Content: record.Content,
+			TTL:     int(record.TTL),
+			Proxied: record.Proxied,
+			Comment: record.Comment,
+			ZoneID:  zoneID,
+		})
+	}
+
+	if err := page.Err(); err != nil {
+		return nil, fmt.Errorf("failed to list DNS records by name and type: %w", err)
 	}
 
 	return records, nil
@@ -1348,6 +1381,26 @@ func corsHeadersFromSDK(h *zero_trust.CORSHeaders) *CORSHeadersParam {
 	return p
 }
 
+// extractAllowedIdPs extracts AllowedIdPs from the SDK union response interface{}.
+// The CF SDK v6 uses apijson custom unmarshaling which may produce []string ([]AllowedIdPs)
+// instead of []interface{} depending on the response type. Handle both.
+func extractAllowedIdPs(v interface{}) []string {
+	switch idps := v.(type) {
+	case []string:
+		return idps
+	case []interface{}:
+		var result []string
+		for _, idp := range idps {
+			if s, ok := idp.(string); ok {
+				result = append(result, s)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
 // applicationFromNewResponse converts AccessApplicationNewResponse to AccessApplication.
 func applicationFromNewResponse(resp *zero_trust.AccessApplicationNewResponse) *AccessApplication {
 	if resp == nil {
@@ -1379,14 +1432,9 @@ func applicationFromNewResponse(resp *zero_trust.AccessApplicationNewResponse) *
 		// CreatedAt and UpdatedAt not available in application responses
 	}
 
-	// Handle AllowedIdPs which is an interface{} in the response
-	if allowedIdPs, ok := resp.AllowedIdPs.([]interface{}); ok {
-		for _, idp := range allowedIdPs {
-			if s, ok := idp.(string); ok {
-				app.AllowedIdps = append(app.AllowedIdps, s)
-			}
-		}
-	}
+	// Handle AllowedIdPs which is an interface{} in union response types.
+	// SDK apijson may unmarshal as []string or []interface{} depending on type.
+	app.AllowedIdps = extractAllowedIdPs(resp.AllowedIdPs)
 
 	// Parse CORSHeaders if any sub-field is non-zero
 	if resp.CORSHeaders.AllowAllHeaders || resp.CORSHeaders.AllowAllMethods ||
@@ -1428,14 +1476,9 @@ func applicationFromGetResponse(resp *zero_trust.AccessApplicationGetResponse) *
 		ReadServiceTokensFromHeader: resp.ReadServiceTokensFromHeader,
 	}
 
-	// Handle AllowedIdPs which is an interface{} in the response
-	if allowedIdPs, ok := resp.AllowedIdPs.([]interface{}); ok {
-		for _, idp := range allowedIdPs {
-			if s, ok := idp.(string); ok {
-				app.AllowedIdps = append(app.AllowedIdps, s)
-			}
-		}
-	}
+	// Handle AllowedIdPs which is an interface{} in union response types.
+	// SDK apijson may unmarshal as []string or []interface{} depending on type.
+	app.AllowedIdps = extractAllowedIdPs(resp.AllowedIdPs)
 
 	// Parse CORSHeaders if any sub-field is non-zero
 	if resp.CORSHeaders.AllowAllHeaders || resp.CORSHeaders.AllowAllMethods ||
@@ -1477,14 +1520,9 @@ func applicationFromUpdateResponse(resp *zero_trust.AccessApplicationUpdateRespo
 		ReadServiceTokensFromHeader: resp.ReadServiceTokensFromHeader,
 	}
 
-	// Handle AllowedIdPs which is an interface{} in the response
-	if allowedIdPs, ok := resp.AllowedIdPs.([]interface{}); ok {
-		for _, idp := range allowedIdPs {
-			if s, ok := idp.(string); ok {
-				app.AllowedIdps = append(app.AllowedIdps, s)
-			}
-		}
-	}
+	// Handle AllowedIdPs which is an interface{} in union response types.
+	// SDK apijson may unmarshal as []string or []interface{} depending on type.
+	app.AllowedIdps = extractAllowedIdPs(resp.AllowedIdPs)
 
 	// Parse CORSHeaders if any sub-field is non-zero
 	if resp.CORSHeaders.AllowAllHeaders || resp.CORSHeaders.AllowAllMethods ||
@@ -1526,14 +1564,9 @@ func applicationFromListResponse(resp *zero_trust.AccessApplicationListResponse)
 		ReadServiceTokensFromHeader: resp.ReadServiceTokensFromHeader,
 	}
 
-	// Handle AllowedIdPs which is an interface{} in the response
-	if allowedIdPs, ok := resp.AllowedIdPs.([]interface{}); ok {
-		for _, idp := range allowedIdPs {
-			if s, ok := idp.(string); ok {
-				app.AllowedIdps = append(app.AllowedIdps, s)
-			}
-		}
-	}
+	// Handle AllowedIdPs which is an interface{} in union response types.
+	// SDK apijson may unmarshal as []string or []interface{} depending on type.
+	app.AllowedIdps = extractAllowedIdPs(resp.AllowedIdPs)
 
 	// Parse CORSHeaders if any sub-field is non-zero
 	if resp.CORSHeaders.AllowAllHeaders || resp.CORSHeaders.AllowAllMethods ||
@@ -1557,6 +1590,9 @@ func policyFromNewResponse(resp *zero_trust.AccessApplicationPolicyNewResponse, 
 		Name:                         name,
 		Decision:                     decision,
 		Precedence:                   int(resp.Precedence),
+		Include:                      accessRulesFromAPI(resp.Include),
+		Exclude:                      accessRulesFromAPI(resp.Exclude),
+		Require:                      accessRulesFromAPI(resp.Require),
 		SessionDuration:              resp.SessionDuration,
 		PurposeJustificationRequired: resp.PurposeJustificationRequired,
 		PurposeJustificationPrompt:   resp.PurposeJustificationPrompt,
@@ -1577,6 +1613,9 @@ func policyFromGetResponse(resp *zero_trust.AccessApplicationPolicyGetResponse) 
 		Name:                         resp.Name,
 		Decision:                     string(resp.Decision),
 		Precedence:                   int(resp.Precedence),
+		Include:                      accessRulesFromAPI(resp.Include),
+		Exclude:                      accessRulesFromAPI(resp.Exclude),
+		Require:                      accessRulesFromAPI(resp.Require),
 		SessionDuration:              resp.SessionDuration,
 		PurposeJustificationRequired: resp.PurposeJustificationRequired,
 		PurposeJustificationPrompt:   resp.PurposeJustificationPrompt,
@@ -1597,6 +1636,9 @@ func policyFromUpdateResponse(resp *zero_trust.AccessApplicationPolicyUpdateResp
 		Name:                         name,
 		Decision:                     decision,
 		Precedence:                   int(resp.Precedence),
+		Include:                      accessRulesFromAPI(resp.Include),
+		Exclude:                      accessRulesFromAPI(resp.Exclude),
+		Require:                      accessRulesFromAPI(resp.Require),
 		SessionDuration:              resp.SessionDuration,
 		PurposeJustificationRequired: resp.PurposeJustificationRequired,
 		PurposeJustificationPrompt:   resp.PurposeJustificationPrompt,
@@ -1617,6 +1659,9 @@ func policyFromListResponse(resp *zero_trust.AccessApplicationPolicyListResponse
 		Name:                         resp.Name,
 		Decision:                     string(resp.Decision),
 		Precedence:                   int(resp.Precedence),
+		Include:                      accessRulesFromAPI(resp.Include),
+		Exclude:                      accessRulesFromAPI(resp.Exclude),
+		Require:                      accessRulesFromAPI(resp.Require),
 		SessionDuration:              resp.SessionDuration,
 		PurposeJustificationRequired: resp.PurposeJustificationRequired,
 		PurposeJustificationPrompt:   resp.PurposeJustificationPrompt,
@@ -1673,6 +1718,85 @@ func groupFromListResponse(resp *zero_trust.AccessGroupListResponse) *AccessGrou
 		ID:   resp.ID,
 		Name: resp.Name,
 	}
+}
+
+// accessRulesFromAPI converts SDK AccessRule responses back to internal AccessRuleParam.
+func accessRulesFromAPI(rules []zero_trust.AccessRule) []AccessRuleParam {
+	if len(rules) == 0 {
+		return nil
+	}
+
+	result := make([]AccessRuleParam, 0, len(rules))
+	for _, rule := range rules {
+		if param := accessRuleFromAPI(&rule); param != nil {
+			result = append(result, *param)
+		}
+	}
+	return result
+}
+
+// accessRuleFromAPI converts a single SDK AccessRule response to internal AccessRuleParam.
+// Returns nil if the rule type is not recognized. SDK AccessRule fields are interface{}
+// union types — only one field is non-nil per rule.
+func accessRuleFromAPI(rule *zero_trust.AccessRule) *AccessRuleParam {
+	if rule == nil {
+		return nil
+	}
+
+	if ip, ok := rule.IP.(zero_trust.IPRuleIP); ok {
+		return &AccessRuleParam{IPRange: &ip.IP}
+	}
+	if geo, ok := rule.Geo.(zero_trust.CountryRuleGeo); ok {
+		return &AccessRuleParam{Country: &geo.CountryCode}
+	}
+	if _, ok := rule.Everyone.(zero_trust.EveryoneRuleEveryone); ok {
+		t := true
+		return &AccessRuleParam{Everyone: &t}
+	}
+	if st, ok := rule.ServiceToken.(zero_trust.ServiceTokenRuleServiceToken); ok {
+		return &AccessRuleParam{ServiceTokenID: &st.TokenID}
+	}
+	if _, ok := rule.AnyValidServiceToken.(zero_trust.AnyValidServiceTokenRuleAnyValidServiceToken); ok {
+		t := true
+		return &AccessRuleParam{AnyValidServiceToken: &t}
+	}
+	if email, ok := rule.Email.(zero_trust.EmailRuleEmail); ok {
+		return &AccessRuleParam{Email: &email.Email}
+	}
+	if domain, ok := rule.EmailDomain.(zero_trust.DomainRuleEmailDomain); ok {
+		return &AccessRuleParam{EmailDomain: &domain.Domain}
+	}
+	if list, ok := rule.EmailList.(zero_trust.EmailListRuleEmailList); ok {
+		return &AccessRuleParam{EmailListID: &list.ID}
+	}
+	if ipList, ok := rule.IPList.(zero_trust.IPListRuleIPList); ok {
+		return &AccessRuleParam{IPListID: &ipList.ID}
+	}
+	if oidc, ok := rule.OIDC.(zero_trust.AccessRuleAccessOIDCClaimRuleOIDC); ok {
+		return &AccessRuleParam{OIDCClaim: &OIDCClaimParam{
+			IdentityProviderID: oidc.IdentityProviderID,
+			ClaimName:          oidc.ClaimName,
+			ClaimValue:         oidc.ClaimValue,
+		}}
+	}
+	if gs, ok := rule.GSuite.(zero_trust.GSuiteGroupRuleGSuite); ok {
+		return &AccessRuleParam{GSuiteGroup: &GSuiteGroupParam{
+			IdentityProviderID: gs.IdentityProviderID,
+			Email:              gs.Email,
+		}}
+	}
+	if _, ok := rule.Certificate.(zero_trust.CertificateRuleCertificate); ok {
+		t := true
+		return &AccessRuleParam{Certificate: &t}
+	}
+	if cn, ok := rule.CommonName.(zero_trust.AccessRuleAccessCommonNameRuleCommonName); ok {
+		return &AccessRuleParam{CommonName: &cn.CommonName}
+	}
+	if grp, ok := rule.Group.(zero_trust.GroupRuleGroup); ok {
+		return &AccessRuleParam{GroupID: &grp.ID}
+	}
+
+	return nil
 }
 
 // accessRulesToAPI converts a slice of AccessRuleParam to SDK AccessRuleUnionParam.

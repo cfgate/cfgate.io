@@ -73,12 +73,41 @@ func (p *PolicyChecker) AllowsDelete() bool {
 	return p.policy == PolicySync
 }
 
+// DNSRecordCache provides per-reconcile caching for DNS record lookups.
+// Create a new cache at the start of each reconcile and pass it through
+// to avoid duplicate remote reads within a single reconcile cycle.
+type DNSRecordCache struct {
+	entries map[string]*DNSRecord
+}
+
+// NewDNSRecordCache creates a new empty record cache.
+func NewDNSRecordCache() *DNSRecordCache {
+	return &DNSRecordCache{entries: make(map[string]*DNSRecord)}
+}
+
+func (c *DNSRecordCache) key(zoneID, name, recordType string) string {
+	return zoneID + ":" + name + ":" + recordType
+}
+
+// Get retrieves a cached record. Returns the record and whether it was found in cache.
+// A nil record with found=true means a previous lookup returned no results.
+func (c *DNSRecordCache) Get(zoneID, name, recordType string) (*DNSRecord, bool) {
+	r, ok := c.entries[c.key(zoneID, name, recordType)]
+	return r, ok
+}
+
+// Set stores a record in the cache.
+func (c *DNSRecordCache) Set(zoneID, name, recordType string, record *DNSRecord) {
+	c.entries[c.key(zoneID, name, recordType)] = record
+}
+
 // DNSService handles DNS record operations including sync, ownership tracking,
 // and policy-based lifecycle management. It wraps the Client interface with
 // cfgate-specific logic for idempotent record sync and external-dns compatible ownership.
 type DNSService struct {
 	client Client
 	log    logr.Logger
+	cache  *DNSRecordCache
 }
 
 // NewDNSService creates a new DNSService with the given client and logger.
@@ -87,6 +116,16 @@ func NewDNSService(client Client, log logr.Logger) *DNSService {
 	return &DNSService{
 		client: client,
 		log:    log.WithName("dns-service"),
+	}
+}
+
+// WithCache returns a copy of the DNSService that uses the given record cache.
+// The cache is scoped to a single reconcile cycle to avoid stale data across reconciles.
+func (s *DNSService) WithCache(cache *DNSRecordCache) *DNSService {
+	return &DNSService{
+		client: s.client,
+		log:    s.log,
+		cache:  cache,
 	}
 }
 
@@ -237,22 +276,36 @@ func (s *DNSService) DeleteRecordWithPolicy(ctx context.Context, zoneID, recordI
 	return s.DeleteRecord(ctx, zoneID, recordID)
 }
 
-// FindRecordByName finds a DNS record by name and type.
+// FindRecordByName finds a DNS record by name and type using targeted API lookup.
+// Uses the reconcile-local cache when available to avoid duplicate remote reads.
 // Returns nil if not found.
 func (s *DNSService) FindRecordByName(ctx context.Context, zoneID, name, recordType string) (*DNSRecord, error) {
-	records, err := s.client.ListDNSRecords(ctx, zoneID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list DNS records: %w", err)
-	}
-
-	for _, record := range records {
-		if record.Name == name && record.Type == recordType {
-			recordCopy := record
-			return &recordCopy, nil
+	if s.cache != nil {
+		if cached, ok := s.cache.Get(zoneID, name, recordType); ok {
+			s.log.V(1).Info("dns record cache hit", "zone", zoneID, "name", name, "type", recordType)
+			return cached, nil
 		}
 	}
 
-	return nil, nil
+	records, err := s.client.ListDNSRecordsByNameType(ctx, zoneID, name, recordType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find DNS record: %w", err)
+	}
+
+	var result *DNSRecord
+	for _, record := range records {
+		if record.Name == name && record.Type == recordType {
+			recordCopy := record
+			result = &recordCopy
+			break
+		}
+	}
+
+	if s.cache != nil {
+		s.cache.Set(zoneID, name, recordType, result)
+	}
+
+	return result, nil
 }
 
 // ListManagedRecords lists all DNS records managed by cfgate.
