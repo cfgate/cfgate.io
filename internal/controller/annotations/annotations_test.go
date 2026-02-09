@@ -339,14 +339,6 @@ func TestValidateRouteAnnotations(t *testing.T) {
 			wantWarnings:    0,
 		},
 		{
-			name:            "deprecated annotation warning",
-			annotations:     map[string]string{AnnotationOriginNoTLSVerify: "true"},
-			requireHostname: false,
-			wantValid:       true,
-			wantErrors:      0,
-			wantWarnings:    1,
-		},
-		{
 			name: "multiple errors",
 			annotations: map[string]string{
 				AnnotationOriginProtocol: "invalid",
@@ -356,17 +348,6 @@ func TestValidateRouteAnnotations(t *testing.T) {
 			wantValid:       false,
 			wantErrors:      2,
 			wantWarnings:    0,
-		},
-		{
-			name: "errors and warnings",
-			annotations: map[string]string{
-				AnnotationOriginProtocol:    "invalid",
-				AnnotationOriginNoTLSVerify: "true",
-			},
-			requireHostname: false,
-			wantValid:       false,
-			wantErrors:      1,
-			wantWarnings:    1,
 		},
 		{
 			name:            "empty annotations valid for HTTPRoute",
@@ -444,29 +425,6 @@ func TestParseOriginConfig(t *testing.T) {
 			wantSSLVerify:   false,
 			wantTimeout:     time.Minute,
 			wantHTTP2:       true,
-		},
-		{
-			name: "deprecated no-tls-verify true",
-			annotations: map[string]string{
-				AnnotationOriginNoTLSVerify: "true",
-			},
-			defaultProtocol: "https",
-			wantProtocol:    "https",
-			wantSSLVerify:   false, // inverted from no-tls-verify=true
-			wantTimeout:     30 * time.Second,
-			wantHTTP2:       false,
-		},
-		{
-			name: "ssl-verify takes precedence over deprecated",
-			annotations: map[string]string{
-				AnnotationOriginSSLVerify:   "true",
-				AnnotationOriginNoTLSVerify: "true",
-			},
-			defaultProtocol: "https",
-			wantProtocol:    "https",
-			wantSSLVerify:   true, // explicit ssl-verify wins
-			wantTimeout:     30 * time.Second,
-			wantHTTP2:       false,
 		},
 		{
 			name:            "default protocol for tcp",
@@ -572,7 +530,6 @@ func TestConstants(t *testing.T) {
 		AnnotationAccessPolicy,
 		AnnotationHostname,
 		AnnotationOriginConnectTimeout,
-		AnnotationOriginNoTLSVerify,
 		AnnotationOriginHTTPHostHeader,
 		AnnotationOriginServerName,
 		AnnotationOriginCAPool,

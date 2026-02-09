@@ -826,67 +826,6 @@ var _ = Describe("HTTPRoute Annotations E2E", Ordered, func() {
 			Expect(r.Annotations["cfgate.io/origin-protocol"]).To(Equal("invalid-protocol"))
 		})
 
-		It("should emit warning event for deprecated annotation", func() {
-			By("Creating test Service")
-			svcName := testID("svc")
-			createTestService(ctx, k8sClient, svcName, namespace.Name, 443)
-
-			By("Creating HTTPRoute with deprecated origin-no-tls-verify annotation")
-			hostname := fmt.Sprintf("%s.%s", testID("deprecated"), testEnv.CloudflareZoneName)
-			routeName := testID("route")
-
-			route := &gatewayv1.HTTPRoute{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      routeName,
-					Namespace: namespace.Name,
-					Annotations: map[string]string{
-						"cfgate.io/origin-protocol": "https",
-						// Deprecated annotation (should emit warning, use origin-ssl-verify instead)
-						"cfgate.io/origin-no-tls-verify": "true",
-						"cfgate.io/dns-sync":             "enabled",
-					},
-				},
-				Spec: gatewayv1.HTTPRouteSpec{
-					CommonRouteSpec: gatewayv1.CommonRouteSpec{
-						ParentRefs: []gatewayv1.ParentReference{
-							{
-								Name:      gatewayv1.ObjectName(gwName),
-								Namespace: (*gatewayv1.Namespace)(&namespace.Name),
-							},
-						},
-					},
-					Hostnames: []gatewayv1.Hostname{gatewayv1.Hostname(hostname)},
-					Rules: []gatewayv1.HTTPRouteRule{
-						{
-							BackendRefs: []gatewayv1.HTTPBackendRef{
-								{
-									BackendRef: gatewayv1.BackendRef{
-										BackendObjectReference: gatewayv1.BackendObjectReference{
-											Name: gatewayv1.ObjectName(svcName),
-											Port: ptrTo(gatewayv1.PortNumber(443)),
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, route)).To(Succeed())
-
-			By("Waiting for route to be processed")
-			Eventually(func() bool {
-				var r gatewayv1.HTTPRoute
-				return k8sClient.Get(ctx, client.ObjectKey{Name: routeName, Namespace: namespace.Name}, &r) == nil
-			}, ShortTimeout, DefaultInterval).Should(BeTrue())
-
-			// The deprecated annotation should still work (backwards compatibility)
-			// but the controller should emit a warning event.
-			// Note: Event verification in E2E is complex; we verify the annotation is preserved.
-			var r gatewayv1.HTTPRoute
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: routeName, Namespace: namespace.Name}, &r)).To(Succeed())
-			Expect(r.Annotations["cfgate.io/origin-no-tls-verify"]).To(Equal("true"))
-		})
 	})
 
 	Context("origin advanced configuration", func() {

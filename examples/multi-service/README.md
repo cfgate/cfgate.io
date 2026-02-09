@@ -4,8 +4,10 @@ Multiple services exposed through a single Cloudflare tunnel.
 
 ```
 api.example.com   ──┐
-                    ├──▶ cloudflared ──▶ Cloudflare Edge
-web.example.com   ──┘
+                    │
+web.example.com   ──┼──▶ cloudflared ──▶ Cloudflare Edge
+                    │
+admin.example.com ──┘
 ```
 
 ## Quick Start
@@ -27,8 +29,12 @@ kubectl apply -k examples/multi-service
 - One `CloudflareTunnel` with 2 replicas
 - One `Gateway` shared by all routes
 - One `CloudflareDNS` watching all HTTPRoutes
-- Two services: `api` and `web`
-- Two HTTPRoutes with different hostnames
+- Three services: `api`, `web`, and `admin`
+- Three HTTPRoutes with different hostnames
+- One `CloudflareAccessPolicy` protecting the admin route
+- One `ReferenceGrant` allowing cross-namespace access policy targeting
+
+> The AccessPolicy lives in `cfgate-system` but targets the admin HTTPRoute in `demo`. This cross-namespace reference requires a [ReferenceGrant](https://gateway-api.sigs.k8s.io/api-types/referencegrant/). See `referencegrant.yaml`.
 
 ## Adding Services
 

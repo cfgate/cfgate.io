@@ -3,8 +3,6 @@ kind: HTTPRoute
 metadata:
   name: api
   namespace: demo
-  annotations:
-    cfgate.io/dns-sync: enabled
 spec:
   parentRefs:
     - name: cloudflare-tunnel
@@ -21,8 +19,6 @@ kind: HTTPRoute
 metadata:
   name: web
   namespace: demo
-  annotations:
-    cfgate.io/dns-sync: enabled
 spec:
   parentRefs:
     - name: cloudflare-tunnel
@@ -40,7 +36,6 @@ metadata:
   name: admin
   namespace: demo
   annotations:
-    cfgate.io/dns-sync: enabled
     cfgate.io/access-policy: cfgate-system/admin-access
 spec:
   parentRefs:

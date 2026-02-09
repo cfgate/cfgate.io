@@ -12,7 +12,6 @@ spec:
   source:
     gatewayRoutes:
       enabled: true
-      annotationFilter: "cfgate.io/dns-sync=enabled"
   defaults:
     proxied: true
     ttl: 1

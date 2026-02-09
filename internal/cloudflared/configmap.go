@@ -213,7 +213,7 @@ func BuildOriginConfig(defaults *cfgatev1alpha1.OriginDefaults, annotations map[
 		if v, ok := annotations["cfgate.io/origin-connect-timeout"]; ok {
 			config.ConnectTimeout = v
 		}
-		if v, ok := annotations["cfgate.io/origin-no-tls-verify"]; ok && v == "true" {
+		if v, ok := annotations["cfgate.io/origin-ssl-verify"]; ok && v == "false" {
 			config.NoTLSVerify = true
 		}
 		if v, ok := annotations["cfgate.io/origin-http-host-header"]; ok {

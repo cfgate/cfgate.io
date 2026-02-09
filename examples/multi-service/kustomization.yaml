@@ -7,5 +7,6 @@ resources:
   - gateway.yaml
   - dns.yaml
   - accesspolicy.yaml
+  - referencegrant.yaml
   - services.yaml
   - httproutes.yaml

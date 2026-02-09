@@ -245,6 +245,23 @@ Release notes are generated via [git-cliff](https://git-cliff.org/) from commit 
 - Use structured logging via `logr` (controller-runtime convention)
 - Doc comments on all exported types and functions
 
+## Documentation
+
+### Where things live
+
+- **README.md** is the hub document. Front-loaded CRD tables, feature matrix, annotation summary, Quick Start, and links to `docs/`. Keep it scannable; don't embed deep reference content here.
+- **docs/*.md** files are deep reference per topic: one file per CRD, one for annotations, one for troubleshooting, one for Gateway API concepts. These are the source of truth for user-facing field documentation.
+- **CONTRIBUTING.md** covers development workflow only (build, test, deploy, code style). Not user-facing.
+- **examples/** contains applyable YAML. Every example directory should work with `kubectl apply -k examples/<name>` against a cluster with cfgate installed. Treat examples as integration tests for documentation accuracy.
+
+### When to update docs
+
+CRD type changes (`api/v1alpha1/*_types.go`) and annotation changes (`internal/controller/annotations/annotations.go`) are the two sources of truth. When you change either, update the corresponding `docs/` file the same way you'd run `mise run codegen`. It's part of the change, not a follow-up.
+
+### Writing style
+
+Match field names to json tags in Go types, not Go field names (`sessionDuration`, not `SessionDuration`). YAML snippets in docs must parse cleanly. When documenting a field, state what it does, valid values, and default, in that order. Skip explanation of why unless the behavior is surprising.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [Apache 2.0 License](LICENSE).

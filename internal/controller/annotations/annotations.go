@@ -84,12 +84,6 @@ const (
 	// Default: "30s"
 	AnnotationOriginConnectTimeout = AnnotationPrefix + "origin-connect-timeout"
 
-	// AnnotationOriginNoTLSVerify disables TLS verification.
-	// Deprecated: Use AnnotationOriginSSLVerify instead.
-	// Values: "true", "false"
-	// Default: "false"
-	AnnotationOriginNoTLSVerify = AnnotationPrefix + "origin-no-tls-verify"
-
 	// AnnotationOriginHTTPHostHeader overrides the Host header sent to origin.
 	// Values: hostname string
 	AnnotationOriginHTTPHostHeader = AnnotationPrefix + "origin-http-host-header"
@@ -323,13 +317,6 @@ func ValidateRouteAnnotations(obj client.Object, requireHostname bool) Validatio
 		}
 	}
 
-	// Check deprecated annotations
-	if GetAnnotation(obj, AnnotationOriginNoTLSVerify) != "" {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("annotation %s is deprecated, use %s instead",
-				AnnotationOriginNoTLSVerify, AnnotationOriginSSLVerify))
-	}
-
 	return result
 }
 
@@ -375,16 +362,6 @@ func ParseOriginConfig(obj client.Object, defaultProtocol string) OriginConfig {
 	// Apply default protocol if not specified
 	if config.Protocol == "" {
 		config.Protocol = defaultProtocol
-	}
-
-	// Handle deprecated no-tls-verify annotation
-	// If origin-ssl-verify is not set but origin-no-tls-verify is set,
-	// use the inverted value
-	if GetAnnotation(obj, AnnotationOriginSSLVerify) == "" {
-		noTLSVerify := GetAnnotationBool(obj, AnnotationOriginNoTLSVerify, false)
-		if noTLSVerify {
-			config.SSLVerify = false
-		}
 	}
 
 	return config
