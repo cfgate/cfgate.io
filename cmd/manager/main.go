@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gwapiv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	cfgatev1alpha1 "cfgate.io/cfgate/api/v1alpha1"
 	"cfgate.io/cfgate/internal/controller"
@@ -36,6 +37,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(cfgatev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(gwapiv1.Install(scheme))
+	utilruntime.Must(gwapiv1beta1.Install(scheme))
 
 	// Viper configuration
 	viper.SetEnvPrefix("CFGATE")

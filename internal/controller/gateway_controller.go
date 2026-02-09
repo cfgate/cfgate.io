@@ -88,7 +88,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// 3. Validate tunnel reference annotation
 	tunnelRef := annotations.GetAnnotation(&gateway, annotations.AnnotationTunnelRef)
 	if tunnelRef == "" {
-		log.Info("Gateway has no tunnel reference annotation")
+		log.V(1).Info("Gateway has no tunnel reference annotation")
 		r.setGatewayCondition(&gateway, gwapiv1.GatewayConditionAccepted, metav1.ConditionFalse, "MissingTunnelRef", "cfgate.io/tunnel-ref annotation is required")
 		if err := r.Status().Update(ctx, &gateway); err != nil {
 			log.Error(err, "failed to update gateway status")
