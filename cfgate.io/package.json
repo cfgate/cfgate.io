@@ -6,11 +6,10 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "astro dev",
-    "dev:wrangler": "wrangler dev",
     "build": "astro check && astro build",
     "preview": "astro preview",
     "check": "astro check",
-    "deploy:cf": "pnpm build && wrangler deploy",
+    "deploy": "pnpm build && wrangler deploy",
     "format": "prettier --write .",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
