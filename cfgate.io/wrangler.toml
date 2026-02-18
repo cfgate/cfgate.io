@@ -1,5 +1,5 @@
 "$schema" = "./node_modules/wrangler/config-schema.json"
-name = "cfgate-worker"
+name = "cfgate-service-worker"
 main = "./src/index.ts"
 compatibility_date = "2026-02-18"
 compatibility_flags = ["nodejs_compat"]
