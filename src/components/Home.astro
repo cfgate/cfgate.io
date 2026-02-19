@@ -30,10 +30,7 @@ const { subtitle, description } = t[locale] ?? t.en
 
 <Base title='cfgate' description={description}>
   <main class='relative flex min-h-dvh flex-col items-center justify-center px-6'>
-    <nav
-      class='absolute top-6 right-6 flex items-center gap-1 text-sm'
-      aria-label='Language'
-    >
+    <nav class='absolute top-6 right-6 flex items-center gap-1 text-sm' aria-label='Language'>
       {
         locales.map((l, i) => (
           <>
@@ -54,11 +51,7 @@ const { subtitle, description } = t[locale] ?? t.en
       {subtitle}
     </p>
     <nav class='mt-8 flex items-center gap-4'>
-      <Button
-        href='https://github.com/inherent-design/cfgate'
-        target='_blank'
-        variant='primary'
-      >
+      <Button href='https://github.com/cfgate/cfgate' target='_blank' variant='primary'>
         github
       </Button>
       <Button href='https://inherent.design' target='_blank' variant='outline'>
