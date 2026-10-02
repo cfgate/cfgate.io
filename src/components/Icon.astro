@@ -1,0 +1,21 @@
+---
+import arrow from '@tabler/icons/outline/arrow-up-right.svg?raw'
+import right from '@tabler/icons/outline/arrow-right.svg?raw'
+import github from '@tabler/icons/outline/brand-github.svg?raw'
+import terminal from '@tabler/icons/outline/terminal-2.svg?raw'
+import shield from '@tabler/icons/outline/shield-check.svg?raw'
+import cloud from '@tabler/icons/outline/cloud.svg?raw'
+import stack from '@tabler/icons/outline/stack-2.svg?raw'
+import check from '@tabler/icons/outline/check.svg?raw'
+import copy from '@tabler/icons/outline/copy.svg?raw'
+import branch from '@tabler/icons/outline/git-branch.svg?raw'
+
+const icons = { arrow, right, github, terminal, shield, cloud, stack, check, copy, branch }
+interface Props {
+  name: keyof typeof icons
+  class?: string
+}
+const { name, class: className } = Astro.props
+---
+
+<span class:list={['icon', className]} aria-hidden='true' set:html={icons[name]} />

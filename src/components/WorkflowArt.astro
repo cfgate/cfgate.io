@@ -1,0 +1,76 @@
+---
+import Icon from './Icon.astro'
+interface Props {
+  kind: 'configure' | 'secure' | 'deploy'
+  label: string
+}
+const { kind, label } = Astro.props
+---
+
+<div class:list={['workflow-art', `art-${kind}`]} role='img' aria-label={label}>
+  <div aria-hidden='true'>
+    {kind === 'configure' && (
+      <>
+        <div class='file-sheet sheet-back'>
+          <span>CloudflareTunnel</span>
+          <i />
+          <i />
+          <i />
+        </div>
+        <div class='file-sheet sheet-front'>
+          <div class='file-heading'>
+            <span class='file-dot' /> route.yaml <span>YAML</span>
+          </div>
+          <div class='mini-code'>
+            <span>
+              kind: <b>HTTPRoute</b>
+            </span>
+            <span>spec:</span>
+            <span>&nbsp; hostnames:</span>
+            <span>
+              &nbsp; &nbsp; - <em>app.example.com</em>
+            </span>
+          </div>
+          <span class='file-corner'>
+            <Icon name='check' />
+          </span>
+        </div>
+      </>
+    )}
+    {kind === 'secure' && (
+      <>
+        <div class='security-orbit orbit-outer' />
+        <div class='security-orbit orbit-inner' />
+        <div class='shield-emblem'>
+          <Icon name='shield' />
+        </div>
+        <span class='policy-chip chip-one'>
+          <span class='chip-dot' /> identity
+        </span>
+        <span class='policy-chip chip-two'>
+          <span class='chip-dot' /> policy
+        </span>
+        <span class='security-caption'>Cloudflare Access</span>
+      </>
+    )}
+    {kind === 'deploy' && (
+      <>
+        <svg class='connection-lines' viewBox='0 0 300 180' fill='none'>
+          <path class='connection-path' d='M58 126 H112 Q150 126 150 90 V62 Q150 42 180 42 H242' />
+          <path class='connection-path connection-return' d='M242 56 V116 Q242 138 216 138 H165' />
+        </svg>
+        <div class='network-node node-cluster'>
+          <Icon name='stack' />
+          <span>Kubernetes</span>
+        </div>
+        <div class='network-node node-cloud'>
+          <Icon name='cloud' />
+          <span>Cloudflare</span>
+        </div>
+        <div class='sync-chip'>
+          <Icon name='check' /> cfgate
+        </div>
+      </>
+    )}
+  </div>
+</div>

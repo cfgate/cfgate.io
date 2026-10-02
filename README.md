@@ -50,6 +50,23 @@ packages. Node types follow the Node 24 runtime. pnpm 12 uses `allowBuilds` in
 `pnpm-workspace.yaml`; only the existing native build tools are allowed. Explicit
 release-age exceptions are version-scoped to the selected upgrades.
 
+## Website design
+
+The landing page is static Astro, with shared English, Chinese, and Hindi copy in
+`src/content/home.ts`. `Home.astro` composes the page; `WorkflowArt.astro` and
+`Icon.astro` supply the small reusable illustrations. Semantic color, typography,
+and motion roles live in `src/styles/global.css`.
+
+Anime.js provides a one-shot introduction, respects reduced motion, and cleans up
+on page exit. Gloss and highlights are static CSS. Content and navigation work
+without JavaScript; the copy button is enabled only when the Clipboard API is
+available. Keep the Configure → Secure → Deploy story clear that Access is opt-in
+and cfgate reconciles infrastructure configuration, not application workloads.
+
+Before shipping visual changes, inspect all three languages on desktop and mobile,
+keyboard focus, reduced motion, and the no-JavaScript fallback. Browser viewport
+sizes must be set explicitly when a tiling window manager is active.
+
 ## Deploy
 
 Deployed automatically via Cloudflare Workers Git integration on push to `main`.

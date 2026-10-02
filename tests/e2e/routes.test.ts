@@ -7,7 +7,9 @@ describe('E2E Route Tests', () => {
       const response = await exports.default.fetch('https://cfgate.io/')
 
       expect(response.status).toBe(200)
-      expect(await response.text()).toContain('<title>cfgate</title>')
+      expect(await response.text()).toContain(
+        '<title>cfgate — Cloudflare management, in Kubernetes</title>'
+      )
     })
 
     it('includes X-Request-Id header', async () => {

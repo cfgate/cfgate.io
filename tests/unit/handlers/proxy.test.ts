@@ -28,7 +28,9 @@ describe('release artifact proxy', () => {
     )
     expect(response.status).toBe(200)
     expect(response.headers.get('Content-Type')).toContain('application/yaml')
-    expect(await response.text()).toBe('kind: CustomResourceDefinition')
+    expect(new TextDecoder().decode(await response.arrayBuffer())).toBe(
+      'kind: CustomResourceDefinition'
+    )
   })
 
   it.each([
