@@ -55,7 +55,9 @@ release-age exceptions are version-scoped to the selected upgrades.
 The landing page is static Astro, with shared English, Chinese, and Hindi copy in
 `src/content/home.ts`. `Home.astro` composes the page; `WorkflowArt.astro` and
 `Icon.astro` supply the small reusable illustrations. Semantic color, typography,
-and motion roles live in `src/styles/global.css`.
+and motion roles live in `src/styles/global.css`. Keep copy concrete and direct:
+describe what users configure and what cfgate manages, without repeated slogans.
+Keep workflow headings and card captions at least 12px across breakpoints.
 
 Anime.js provides a one-shot introduction, respects reduced motion, and cleans up
 on page exit. Gloss and highlights are static CSS. Content and navigation work

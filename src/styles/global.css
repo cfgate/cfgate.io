@@ -291,7 +291,7 @@ button:focus-visible {
   align-items: baseline;
   gap: 20px;
   padding: 0 4px 20px;
-  font: 10px/1.6 var(--font-code);
+  font: 12px/1.6 var(--font-code);
   letter-spacing: 0.025em;
 }
 .section-heading h2 {
@@ -301,7 +301,7 @@ button:focus-visible {
   color: #b2afb8;
 }
 .section-heading > span {
-  color: #89868f;
+  color: #b2afb8;
 }
 .workflow-grid {
   list-style: none;
@@ -391,7 +391,7 @@ button:focus-visible {
 }
 .card-description {
   color: var(--card-muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.75;
   margin-top: 12px;
   min-height: 91px;
@@ -415,7 +415,7 @@ button:focus-visible {
   justify-content: space-between;
   gap: 10px;
   border-top: 1px solid var(--local-line);
-  font: 10px/1.6 var(--font-code);
+  font: 12px/1.6 var(--font-code);
 }
 .card-caption .icon {
   width: 15px;
@@ -463,12 +463,12 @@ button:focus-visible {
   align-items: center;
   padding: 8px 12px;
   border-bottom: 1px solid #dcd9e2;
-  font-size: 8px;
+  font-size: 10px;
   color: #56505f;
 }
 .file-heading > span:last-child {
   margin-left: auto;
-  font-size: 7px;
+  font-size: 9px;
 }
 .file-dot {
   width: 5px;
@@ -481,7 +481,7 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   color: #736781;
-  font-size: 9px;
+  font-size: 10px;
 }
 .mini-code b {
   color: #302638;
@@ -558,7 +558,7 @@ button:focus-visible {
   box-shadow: 0 6px 12px #47425415;
   border-radius: 5px;
   padding: 5px 10px;
-  font: 9px var(--font-code);
+  font: 10px var(--font-code);
   color: #575060;
 }
 .chip-one {
@@ -582,8 +582,8 @@ button:focus-visible {
   bottom: 8px;
   width: 100%;
   text-align: center;
-  font: 8px var(--font-code);
-  color: #625c71;
+  font: 10px var(--font-code);
+  color: #46434f;
 }
 .connection-lines {
   position: absolute;
@@ -605,7 +605,7 @@ button:focus-visible {
   border-radius: 13px;
   display: grid;
   place-items: center;
-  color: #54280e;
+  color: #311708;
   background: linear-gradient(145deg, #ffd6a0, #ffb36b);
   border: 1px solid #ffdfa9;
   box-shadow:
@@ -619,7 +619,7 @@ button:focus-visible {
 .network-node span:not(.icon) {
   position: absolute;
   top: 70px;
-  font: 8px var(--font-code);
+  font: 10px var(--font-code);
 }
 .node-cluster {
   left: 10px;
@@ -643,15 +643,15 @@ button:focus-visible {
   background: #f58631;
   box-shadow: 0 3px 9px #8d330e22;
   padding: 5px 8px;
-  font: 9px var(--font-code);
+  font: 10px var(--font-code);
 }
 .sync-chip .icon {
   width: 12px;
   height: 12px;
 }
 .workflow-note {
-  color: #929099;
-  font-size: 11px;
+  color: var(--ink-muted);
+  font-size: 12px;
   line-height: 1.8;
   text-align: center;
   margin: 28px auto 0;
@@ -910,9 +910,6 @@ pre {
     transform-origin: center;
     margin-inline: -15px;
   }
-  .card-caption {
-    font-size: 9px;
-  }
   .install {
     gap: 40px;
   }
@@ -970,7 +967,7 @@ pre {
     margin-top: 20px;
   }
   .eyebrow {
-    font-size: 9px;
+    font-size: 11px;
   }
   .hero-actions {
     gap: 7px;
@@ -1010,7 +1007,6 @@ pre {
   }
   .card-caption {
     min-height: 65px;
-    font-size: 10px;
   }
   .card-top {
     margin-bottom: 22px;
