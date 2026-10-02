@@ -13,7 +13,8 @@ Project website, Go vanity imports, and release proxy for [cfgate](https://githu
 
 ## Development
 
-Use Node.js 24 and the pnpm version pinned in `package.json`.
+Use Node.js 24.16.0 or newer within the 24.x line and the pnpm version pinned in
+`package.json`.
 
 ```sh
 pnpm install

@@ -3,13 +3,53 @@ import { describe, expect, it } from 'vitest'
 
 describe('E2E Route Tests', () => {
   describe('Landing page', () => {
-    it('serves the built landing page', async () => {
-      const response = await exports.default.fetch('https://cfgate.io/')
+    it.each([
+      {
+        path: '/',
+        lang: 'en',
+        title: 'cfgate: Manage Cloudflare from Kubernetes',
+        content: 'Connect your services',
+      },
+      {
+        path: '/zh/',
+        lang: 'zh-CN',
+        title: 'cfgate: 在 Kubernetes 中管理 Cloudflare',
+        content: '连接你的服务。',
+      },
+      {
+        path: '/hi/',
+        lang: 'hi',
+        title: 'cfgate: Kubernetes से Cloudflare का प्रबंधन',
+        content: 'अपनी सेवाओं को जोड़ें',
+      },
+    ])('serves localized content and metadata at $path', async ({ path, lang, title, content }) => {
+      const url = `https://cfgate.io${path}`
+      const response = await exports.default.fetch(url)
 
       expect(response.status).toBe(200)
-      expect(await response.text()).toContain(
-        '<title>cfgate — Cloudflare management, in Kubernetes</title>'
-      )
+      expect(response.headers.get('Content-Type')).toContain('text/html')
+      const html = await response.text()
+      expect(html).toContain(`<html lang="${lang}"`)
+      expect(html).toContain(`<title>${title}</title>`)
+      expect(html).toContain(`<meta property="og:title" content="${title}">`)
+      expect(html).toContain(`<link rel="canonical" href="${url}">`)
+      expect(html).toContain(`<meta property="og:url" content="${url}">`)
+      expect(html).toContain(content)
+    })
+
+    it('lists exactly the three canonical pages in the sitemap', async () => {
+      const response = await exports.default.fetch('https://cfgate.io/sitemap.xml')
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Type')).toContain('xml')
+      const xml = await response.text()
+      expect(xml).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">')
+      const urls = Array.from(xml.matchAll(/<loc>(.*?)<\/loc>/g), ([, url]) => url)
+      expect(urls.sort()).toEqual([
+        'https://cfgate.io/',
+        'https://cfgate.io/hi/',
+        'https://cfgate.io/zh/',
+      ])
     })
 
     it('includes X-Request-Id header', async () => {

@@ -15,6 +15,7 @@ export const locales = [
 ]
 
 const en = {
+  title: 'cfgate: Manage Cloudflare from Kubernetes',
   description:
     'Manage Cloudflare Tunnel, DNS, and Access with Kubernetes resources. cfgate applies your configuration and keeps it in sync.',
   skip: 'Skip to content',
@@ -91,6 +92,7 @@ const en = {
 }
 
 const zh: typeof en = {
+  title: 'cfgate: 在 Kubernetes 中管理 Cloudflare',
   description:
     '使用 Kubernetes 资源管理 Cloudflare Tunnel、DNS 和 Access。cfgate 应用配置并持续保持同步。',
   skip: '跳至内容',
@@ -160,6 +162,7 @@ const zh: typeof en = {
 }
 
 const hi: typeof en = {
+  title: 'cfgate: Kubernetes से Cloudflare का प्रबंधन',
   description:
     'Kubernetes संसाधनों से Cloudflare Tunnel, DNS और Access प्रबंधित करें। cfgate आपकी कॉन्फ़िगरेशन लागू करता है और उसे सिंक में रखता है।',
   skip: 'मुख्य सामग्री पर जाएँ',
