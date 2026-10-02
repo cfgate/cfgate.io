@@ -1,0 +1,50 @@
+{
+  "releases": {
+    "checkedAt": "2026-10-02T22:39:23.888487+00:00",
+    "source": "snapshot",
+    "operator": [
+      {
+        "version": "v0.2.0-alpha.7",
+        "published": "2026-10-02T08:28:22Z",
+        "url": "https://github.com/cfgate/cfgate/releases/tag/v0.2.0-alpha.7"
+      },
+      {
+        "version": "v0.2.0-alpha.6",
+        "published": "2026-10-01T06:29:35Z",
+        "url": "https://github.com/cfgate/cfgate/releases/tag/v0.2.0-alpha.6"
+      },
+      {
+        "version": "v0.2.0-alpha.5",
+        "published": "2026-05-24T00:09:23Z",
+        "url": "https://github.com/cfgate/cfgate/releases/tag/v0.2.0-alpha.5"
+      }
+    ],
+    "chart": [
+      {
+        "version": "v1.6.0",
+        "published": "2026-10-02T14:21:12Z",
+        "url": "https://github.com/cfgate/helm-chart/releases/tag/v1.6.0"
+      },
+      {
+        "version": "v1.5.0",
+        "published": "2026-10-01T08:42:17Z",
+        "url": "https://github.com/cfgate/helm-chart/releases/tag/v1.5.0"
+      },
+      {
+        "version": "v1.4.0",
+        "published": "2026-05-24T18:32:37Z",
+        "url": "https://github.com/cfgate/helm-chart/releases/tag/v1.4.0"
+      }
+    ],
+    "chartAppVersion": "0.2.0-alpha.7"
+  },
+  "ci": {
+    "checkedAt": "2026-10-02T22:39:23.888487+00:00",
+    "source": "snapshot",
+    "status": "completed",
+    "conclusion": "success",
+    "sha": "524294ffc28bf55a0e62c2af3633c9aab9ec6511",
+    "url": "https://github.com/cfgate/cfgate/actions/runs/26424328274",
+    "updatedAt": "2026-05-25T23:48:13Z"
+  }
+}

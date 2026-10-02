@@ -1,6 +1,8 @@
 ---
 import Base from '@/layouts/Base.astro'
 import Icon from './Icon.astro'
+import ReleaseStrip from './ReleaseStrip.astro'
+import ConfigurationExample from './ConfigurationExample.astro'
 import WorkflowArt from './WorkflowArt.astro'
 import { homeCopy, links, locales } from '@/content/home'
 
@@ -39,7 +41,7 @@ const command =
   'helm install cfgate oci://ghcr.io/cfgate/charts/cfgate \\\n  --namespace cfgate-system --create-namespace'
 ---
 
-<Base title={t.title} description={t.description}>
+<Base title={t.title} description={t.description} homeAlternates>
   <a class='skip-link' href='#main'>
     {t.skip}
   </a>
@@ -98,6 +100,9 @@ const command =
         </a>
       </div>
     </section>
+    <div class='container home-release'>
+      <ReleaseStrip />
+    </div>
     <section class='workflow container' id='how-it-works' aria-labelledby='workflow-title'>
       <div class='section-heading'>
         <h2 id='workflow-title'>{t.workflow}</h2>
@@ -133,6 +138,7 @@ const command =
         </a>
       </p>
     </section>
+    <ConfigurationExample />
     <section class='features container' aria-labelledby='features-title'>
       <h2 class='eyebrow' id='features-title'>
         {t.detailLabel}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "configMigration": true,
+  "schedule": ["before 9am on monday"],
+  "timezone": "America/Los_Angeles",
+  "automerge": false,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/.github/workflows/.*\\.yml$/"],
+      "matchStrings": [
+        "version: (?<currentValue>v[0-9.]+) # renovate: depName=(?<depName>[^\\s]+)"
+      ],
+      "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Keep Vitest packages aligned with the Cloudflare test plugin",
+      "matchPackageNames": ["vitest", "@vitest/runner", "@vitest/snapshot"],
+      "groupName": "vitest",
+      "allowedVersions": "<5"
+    },
+    {
+      "description": "Astro checker and typescript-eslint currently support TypeScript 6",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Keep Node runtime and type definitions on the supported major",
+      "matchPackageNames": ["node", "@types/node"],
+      "allowedVersions": ">=24.16.0 <25"
+    }
+  ]
+}

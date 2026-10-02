@@ -1,0 +1,8 @@
+scan:
+  skip-dirs:
+    - node_modules
+    - dist
+    - .git
+    - .wrangler
+pkg:
+  include-dev-deps: true

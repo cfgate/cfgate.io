@@ -7,6 +7,7 @@ import { requestIdMiddleware } from '@/middleware/request-id.js'
 
 // Handlers
 import { errorHandler, notFoundHandler } from '@/handlers/error.js'
+import { projectHandler } from '@/handlers/project.js'
 import { landingHandler } from '@/handlers/landing.js'
 import { PROXY_PATHS, proxyHandler } from '@/handlers/proxy.js'
 import { redirectHandler } from '@/handlers/redirect.js'
@@ -34,6 +35,8 @@ app.notFound(notFoundHandler)
 for (const path in PROXY_PATHS) {
   app.get(path, proxyHandler)
 }
+
+app.get('/api/project', projectHandler)
 
 // Root path handler
 app.get('/', (c) => {

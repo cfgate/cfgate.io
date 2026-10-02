@@ -73,3 +73,47 @@ sizes must be set explicitly when a tiling window manager is active.
 ## Deploy
 
 Deployed automatically via Cloudflare Workers Git integration on push to `main`.
+
+## Project information
+
+The homepage example and the English `/releases/` and `/project/` pages complement
+the existing GitHub documentation. They do not maintain a second installation
+guide. Other homepage languages label links to these English pages explicitly.
+
+`src/data/project.json` is a dated, verified fallback snapshot. Static pages render
+it without JavaScript. `GET /api/project` refreshes GitHub releases, reads the
+published chart tag's `Chart.yaml` for its operator pairing, and retrieves the
+operator's latest main-branch CI run. Requests share a six-second deadline; the
+Worker caches the result for 30 minutes per Cloudflare location. Release and CI
+failures fall back independently, preserving the snapshot's original timestamps.
+The cache is an optimization, not persistent storage. Unauthenticated GitHub rate
+limits can result in fallback data. No provider credentials are needed.
+
+The browser uses text nodes to update these fields; it never renders provider
+Markdown or HTML. Codecov's main-branch badge and report are separate from the
+GitHub CI result. Artifact Hub links provide package discovery. These signals are
+not deployment health checks or blanket release certifications.
+
+When refreshing the bundled snapshot, verify published tags and dates against the
+two repositories' release APIs, read `appVersion` from the matching chart tag, and
+record the CI run URL, full SHA, update time, and retrieval time. Keep `source` set
+to `snapshot`; runtime refreshes identify successfully fetched data as `github`.
+Do not advance timestamps when retaining old data.
+
+## Dependency maintenance and security
+
+`renovate.json` follows the project's Monday update schedule with manual merges.
+Vitest stays below 5, TypeScript below 7, and Node/runtime types on 24.x until the
+compatibility constraints above are reevaluated. Other major upgrades can be
+proposed for review. Renovate requires its GitHub App to have repository access.
+
+The Security Scan workflow runs Trivy on PRs, main pushes, and weekly schedules.
+It scans the source and lockfile, including development dependencies, for HIGH
+and CRITICAL vulnerabilities and secrets. Build/cache directories are excluded.
+Findings fail the job; SARIF is uploaded for trusted repository runs. Fork PRs
+still scan but skip the upload. The action is pinned by commit, and Renovate tracks
+the Trivy binary version. Run the equivalent check locally with Trivy 0.74.0:
+
+```sh
+trivy fs --config trivy.yaml --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 1 .
+```

@@ -1,0 +1,42 @@
+---
+import Base from './Base.astro'
+import ReleaseStrip from '@/components/ReleaseStrip.astro'
+interface Props {
+  title: string
+  description: string
+}
+const { title, description } = Astro.props
+---
+
+<Base title={`cfgate: ${title}`} description={description}>
+  <a class='skip-link' href='#main'>
+    Skip to content
+  </a>
+  <header class='site-header container detail-header'>
+    <a class='wordmark' href='/' aria-label='cfgate home'>
+      <span>cf</span>gate<span class='wordmark-period'>.</span>
+    </a>
+    <nav class='header-nav' aria-label='Main navigation'>
+      <a href='/releases/' aria-current={Astro.url.pathname === '/releases/' ? 'page' : undefined}>
+        Releases
+      </a>
+      <a href='/project/' aria-current={Astro.url.pathname === '/project/' ? 'page' : undefined}>
+        Project
+      </a>
+      <a href='https://github.com/cfgate/cfgate#documentation'>Documentation ↗</a>
+    </nav>
+  </header>
+  <main class='container detail-page' id='main' tabindex='-1'>
+    <p class='eyebrow'>cfgate / {title}</p>
+    <h1>{title}</h1>
+    <p class='section-intro'>{description}</p>
+    <ReleaseStrip />
+    <slot />
+  </main>
+  <footer class='site-footer container'>
+    <p>
+      A project by <a href='https://inherent.design'>inherent.design ↗</a>
+    </p>
+    <a href='https://github.com/cfgate/cfgate'>GitHub ↗</a>
+  </footer>
+</Base>
