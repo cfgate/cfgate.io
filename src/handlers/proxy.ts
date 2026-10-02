@@ -13,9 +13,10 @@ const GITHUB_RELEASE_BASE = 'https://github.com/cfgate/cfgate/releases/latest/do
 export const PROXY_PATHS: Record<string, string> = {
   '/install.yaml': '/install.yaml',
   '/crds.yaml': '/crds.yaml',
-  '/crds/tunnel.yaml': '/crds/cloudflaretunnels.yaml',
-  '/crds/dns.yaml': '/crds/cloudflarednses.yaml',
-  '/crds/access.yaml': '/crds/cloudflareaccesspolicies.yaml',
+  '/crds/tunnel.yaml': '/cloudflaretunnels.yaml',
+  '/crds/dns.yaml': '/cloudflarednses.yaml',
+  '/crds/access.yaml': '/cloudflareaccesspolicies.yaml',
+  '/crds/access-application.yaml': '/cloudflareaccessapplications.yaml',
 }
 
 /**
