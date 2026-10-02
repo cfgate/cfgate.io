@@ -84,7 +84,9 @@ guide. Other homepage languages label links to these English pages explicitly.
 it without JavaScript. `GET /api/project` refreshes GitHub releases, reads the
 published chart tag's `Chart.yaml` for its operator pairing, and retrieves the
 operator's latest main-branch CI run. Requests share a six-second deadline; the
-Worker caches the result for 30 minutes per Cloudflare location. Release and CI
+Worker caches the result for 30 minutes per Cloudflare location. Concurrent cache
+misses share one in-progress refresh within each Worker instance, including the
+cache write; separate instances can still refresh independently. Release and CI
 failures fall back independently, preserving the snapshot's original timestamps.
 The cache is an optimization, not persistent storage. Unauthenticated GitHub rate
 limits can result in fallback data. No provider credentials are needed.
