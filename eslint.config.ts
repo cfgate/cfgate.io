@@ -5,6 +5,7 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default defineConfig([
+  { ignores: ['src/worker-configuration.d.ts', 'dist/**', '.astro/**', '.wrangler/**'] },
   {
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
