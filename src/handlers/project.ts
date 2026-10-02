@@ -2,7 +2,11 @@ import type { Context } from 'hono'
 import type { AppEnv } from '@/types'
 import { loadProjectData } from '@/lib/project'
 
-let refresh: Promise<Response> | undefined
+let refresh: Promise<string> | undefined
+const responseHeaders = {
+  'Content-Type': 'application/json',
+  'Cache-Control': 'public, max-age=1800',
+}
 
 export async function projectHandler(c: Context<AppEnv>): Promise<Response> {
   c.var.logCtx.handler = 'project'
@@ -14,17 +18,16 @@ export async function projectHandler(c: Context<AppEnv>): Promise<Response> {
   // Coalesce misses within this isolate, including the cache-write window.
   refresh ??= (async () => {
     const data = await loadProjectData()
-    const response = Response.json(data, {
-      headers: { 'Cache-Control': 'public, max-age=1800' },
-    })
+    const body = JSON.stringify(data)
     try {
-      await cache.put(key, response.clone())
+      await cache.put(key, new Response(body, { headers: responseHeaders }))
     } catch {
       // Cache availability must not prevent serving the fetched response.
     }
-    return response
+    return body
   })().finally(() => {
     refresh = undefined
   })
-  return (await refresh).clone()
+  // Worker response streams belong to their request; only plain data can be shared.
+  return new Response(await refresh, { headers: responseHeaders })
 }
