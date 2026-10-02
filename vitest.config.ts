@@ -1,21 +1,15 @@
-import path from 'node:path'
-import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config'
+import { fileURLToPath } from 'node:url'
+import { cloudflareTest } from '@cloudflare/vitest-plugin'
+import { defineConfig } from 'vitest/config'
 
-export default defineWorkersConfig({
-  esbuild: {
-    exclude: ['node_modules', 'docs'],
-  },
+export default defineConfig({
+  plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.toml' } })],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
   test: {
-    include: ['tests\/{**,.}\/*.test.ts'],
-    poolOptions: {
-      workers: {
-        wrangler: { configPath: './wrangler.toml' },
-      },
-    },
+    include: ['tests/**/*.test.ts'],
   },
 })
