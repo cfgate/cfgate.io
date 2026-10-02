@@ -1,62 +1,223 @@
 ---
 import Base from '@/layouts/Base.astro'
-import { Button } from '@inherent.design/brand/components/button'
-import { Separator } from '@inherent.design/brand/components/separator'
+import Icon from './Icon.astro'
+import WorkflowArt from './WorkflowArt.astro'
+import { homeCopy, links, locales } from '@/content/home'
 
 const locale = Astro.currentLocale ?? 'en'
-const locales = [
-  { code: 'en', label: 'en', href: '/' },
-  { code: 'hi', label: 'hi', href: '/hi/' },
-  { code: 'zh', label: 'zh', href: '/zh/' },
+const t = homeCopy[locale] ?? homeCopy.en
+const steps = [
+  {
+    kind: 'configure' as const,
+    number: '01',
+    icon: 'terminal' as const,
+    title: t.configure,
+    text: t.configureCopy,
+    tag: t.configureTag,
+    label: t.diagramConfig,
+  },
+  {
+    kind: 'secure' as const,
+    number: '02',
+    icon: 'shield' as const,
+    title: t.secure,
+    text: t.secureCopy,
+    tag: t.secureTag,
+    label: t.diagramSecure,
+  },
+  {
+    kind: 'deploy' as const,
+    number: '03',
+    icon: 'cloud' as const,
+    title: t.deploy,
+    text: t.deployCopy,
+    tag: t.deployTag,
+    label: t.diagramDeploy,
+  },
 ]
-
-const t: Record<string, { subtitle: string; description: string }> = {
-  en: {
-    subtitle: 'cloudflare management, in kubernetes.',
-    description: 'Cloudflare management, in Kubernetes.',
-  },
-  zh: {
-    subtitle: 'kubernetes 原生 cloudflare 管理。',
-    description: 'Kubernetes 原生 Cloudflare 管理。',
-  },
-  hi: {
-    subtitle: 'cloudflare का प्रबंधन, kubernetes में।',
-    description: 'Kubernetes में Cloudflare का प्रबंधन।',
-  },
-}
-
-const { subtitle, description } = t[locale] ?? t.en
+const command =
+  'helm install cfgate oci://ghcr.io/cfgate/charts/cfgate \\\n  --namespace cfgate-system --create-namespace'
 ---
 
-<Base title='cfgate' description={description}>
-  <main class='relative flex min-h-dvh flex-col items-center justify-center px-6'>
-    <nav class='absolute top-6 right-6 flex items-center gap-1 text-sm' aria-label='Language'>
-      {
-        locales.map((l, i) => (
-          <>
-            {i > 0 && <Separator orientation='vertical' class='h-3 self-center' />}
-            {l.code === locale ? (
-              <span class='locale-active'>{l.label}</span>
-            ) : (
-              <a href={l.href} class='locale-link'>
-                {l.label}
-              </a>
-            )}
-          </>
-        ))
-      }
+<Base title='cfgate — Cloudflare management, in Kubernetes' description={t.description}>
+  <a class='skip-link' href='#main'>
+    {t.skip}
+  </a>
+  <header class='site-header container'>
+    <a class='wordmark' href={locale === 'en' ? '/' : `/${locale}/`} aria-label={t.home}>
+      <span>cf</span>gate<span class='wordmark-period'>.</span>
+    </a>
+    <nav class='header-nav' aria-label={t.nav}>
+      <a class='header-how' href='#how-it-works'>
+        {t.how}
+      </a>
+      <a href={links.docs}>
+        {t.docs}
+        <Icon name='arrow' />
+      </a>
+      <a class='github-link' href={links.repository} aria-label={t.github}>
+        <Icon name='github' />
+        <span>GitHub</span>
+      </a>
     </nav>
-    <h1 class='site-title'><span class='text-primary'>cf</span>gate</h1>
-    <p class='mt-4 text-muted-foreground text-center'>
-      {subtitle}
-    </p>
-    <nav class='mt-8 flex flex-col sm:flex-row items-center gap-4'>
-      <Button href='https://github.com/cfgate/cfgate' target='_blank' variant='primary'>
-        github
-      </Button>
-      <Button href='https://inherent.design' target='_blank' variant='outline'>
-        inherent.design
-      </Button>
+    <nav class='locale-nav' aria-label={t.language}>
+      {locales.map((l) => (
+        <a
+          href={l.href}
+          lang={l.code}
+          hreflang={l.code}
+          aria-label={l.name}
+          aria-current={l.code === locale ? 'page' : undefined}
+        >
+          {l.label}
+        </a>
+      ))}
     </nav>
+  </header>
+  <main id='main' tabindex='-1'>
+    <section class='hero container' aria-labelledby='hero-title'>
+      <p class='eyebrow'>
+        <span class='status-dot' />
+        {t.eyebrow}
+      </p>
+      <h1 id='hero-title'>
+        {t.heading}
+        <br />
+        <span>{t.accent}</span>
+      </h1>
+      <p class='hero-copy'>{t.intro}</p>
+      <div class='hero-actions'>
+        <a class='button button-primary' href={links.start}>
+          {t.start}
+          <Icon name='right' />
+        </a>
+        <a class='button button-quiet' href={links.repository}>
+          <Icon name='github' />
+          {t.explore}
+          <Icon name='arrow' />
+        </a>
+      </div>
+    </section>
+    <section class='workflow container' id='how-it-works' aria-labelledby='workflow-title'>
+      <div class='section-heading'>
+        <h2 id='workflow-title'>{t.workflow}</h2>
+        <span>{t.workflowNote}</span>
+      </div>
+      <ol class='workflow-grid'>
+        {steps.map((step) => (
+          <li class:list={['workflow-card', `card-${step.kind}`]}>
+            <div class='card-top'>
+              <span class='card-icon'>
+                <Icon name={step.icon} />
+              </span>
+              <span class='step-number'>{step.number}</span>
+            </div>
+            <h3>
+              {step.title}
+              <span class='card-period'>.</span>
+            </h3>
+            <p class='card-description'>{step.text}</p>
+            <WorkflowArt kind={step.kind} label={step.label} />
+            <div class='card-caption'>
+              <span>{step.tag}</span>
+              <Icon name='right' />
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p class='workflow-note'>
+        {t.workflowCaveat}{' '}
+        <a href={links.access}>
+          {t.accessGuide}
+          <Icon name='arrow' />
+        </a>
+      </p>
+    </section>
+    <section class='features container' aria-labelledby='features-title'>
+      <h2 class='eyebrow' id='features-title'>
+        {t.detailLabel}
+      </h2>
+      <div class='feature-grid'>
+        {t.features.map((feature) => (
+          <article class='feature'>
+            <Icon name={feature.icon as 'branch' | 'stack' | 'github'} />
+            <h3>{feature.title}</h3>
+            <p>{feature.text}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+    <section class='install container' aria-labelledby='install-title'>
+      <div class='install-copy'>
+        <p class='eyebrow'>{t.installLabel}</p>
+        <h2 id='install-title'>{t.installTitle}</h2>
+        <p>{t.installCopy}</p>
+        <a class='text-link' href={links.install}>
+          {t.installGuide}
+          <Icon name='arrow' />
+        </a>
+      </div>
+      <div class='install-example'>
+        <div class='terminal-window'>
+          <div class='terminal-heading'>
+            <span>
+              <Icon name='terminal' />
+              {t.terminal}
+            </span>
+            <button
+              class='copy-button'
+              type='button'
+              data-copy
+              data-copied={t.copied}
+              data-failed={t.copyFailed}
+              aria-label={t.copy}
+              hidden
+            >
+              <Icon name='copy' />
+            </button>
+          </div>
+          <pre><code id='install-command'>{command}</code></pre>
+        </div>
+        <p class='install-prereq'>{t.prereq}</p>
+        <span class='copy-feedback' role='status' aria-live='polite' data-copy-feedback />
+      </div>
+    </section>
+    <section class='community container' aria-labelledby='community-title'>
+      <div>
+        <h2 id='community-title'>{t.community}</h2>
+        <p>{t.communityCopy}</p>
+      </div>
+      <div class='community-actions'>
+        <a class='button button-outline' href={links.contribute}>
+          {t.contribute}
+          <Icon name='branch' />
+        </a>
+        <a class='text-link' href={links.issues}>
+          {t.issue}
+          <Icon name='arrow' />
+        </a>
+      </div>
+    </section>
   </main>
+  <footer class='site-footer container'>
+    <div>
+      <a class='wordmark' href={locale === 'en' ? '/' : `/${locale}/`} aria-label={t.home}>
+        <span>cf</span>gate<span class='wordmark-period'>.</span>
+      </a>
+      <p>{t.footer}</p>
+    </div>
+    <div class='footer-meta'>
+      <span>
+        {t.by}{' '}
+        <a href='https://inherent.design'>
+          inherent.design
+          <Icon name='arrow' />
+        </a>
+      </span>
+      <a href='https://github.com/cfgate/cfgate/blob/main/LICENSE'>{t.license}</a>
+    </div>
+  </footer>
 </Base>
+<script>
+  import '@/scripts/home'
+</script>

@@ -25,3 +25,6 @@ experimentalOperatorPosition: end
 requirePragma: false
 insertPragma: false
 checkIgnorePragma: false
+
+plugins:
+  - prettier-plugin-astro
