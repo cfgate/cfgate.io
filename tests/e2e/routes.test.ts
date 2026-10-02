@@ -74,6 +74,20 @@ describe('E2E Route Tests', () => {
     })
   })
 
+  it('serves concurrent project refreshes across Worker request contexts', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 4 }, (_, index) =>
+        exports.default.fetch(`https://cfgate.io/api/project?request=${index}`)
+      )
+    )
+    for (const response of responses) {
+      expect(response.status).toBe(200)
+      const data = (await response.json()) as { releases: { operator: unknown[]; source: string } }
+      expect(data.releases.operator.length).toBeGreaterThan(0)
+      expect(['snapshot', 'github']).toContain(data.releases.source)
+    }
+  }, 10000)
+
   describe('Vanity imports', () => {
     it('returns go-import meta tag for /?go-get=1', async () => {
       const response = await exports.default.fetch('https://cfgate.io/?go-get=1')
