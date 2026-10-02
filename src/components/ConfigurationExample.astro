@@ -1,0 +1,53 @@
+---
+import { projectCopy } from '@/content/project'
+import { links } from '@/content/home'
+const locale = (Astro.currentLocale ?? 'en') as keyof typeof projectCopy
+const t = projectCopy[locale] ?? projectCopy.en
+const example = `apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+spec:
+  parentRefs:
+    - name: public
+  hostnames:
+    - app.example.com
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080`
+---
+
+<section class='configuration-example container' aria-labelledby='example-title'>
+  <p class='eyebrow'>{t.exampleLabel}</p>
+  <h2 id='example-title'>{t.exampleTitle}</h2>
+  <p class='section-intro'>{t.exampleIntro}</p>
+  <div class='example-grid'>
+    <div class='terminal-window'>
+      <div class='terminal-heading'>route.yaml</div>
+      <pre><code>{example}</code></pre>
+    </div>
+    <div class='example-explanation'>
+      <div class='route-flow' aria-label='app.example.com → tunnel → web:8080'>
+        <code>app.example.com</code>
+        <span aria-hidden='true'>→</span>
+        <code>cloudflared</code>
+        <span aria-hidden='true'>→</span>
+        <code>web:8080</code>
+      </div>
+      <dl>
+        <dt>{t.route}</dt>
+        <dd>{t.routeText}</dd>
+        <dt>{t.dns}</dt>
+        <dd>{t.dnsText}</dd>
+        <dt>{t.access}</dt>
+        <dd>{t.accessText}</dd>
+      </dl>
+    </div>
+  </div>
+  <p class='section-note'>{t.examplePrereq}</p>
+  <div class='resource-links'>
+    <a href='https://github.com/cfgate/cfgate/tree/main/config/samples'>{t.examples} ↗</a>
+    <a href={links.access}>{t.protection} ↗</a>
+  </div>
+</section>

@@ -1,0 +1,92 @@
+---
+import ProjectPage from '@/layouts/ProjectPage.astro'
+import { projectSnapshot as data } from '@/lib/project'
+---
+
+<ProjectPage
+  title='Project'
+  description='Development checks, source code, and ways to contribute to cfgate.'
+>
+  <div class='detail-grid'>
+    <section class='content-panel'>
+      <h2>Development checks</h2>
+      <p>
+        Latest recorded <code>main</code> branch CI run for the operator:
+      </p>
+      <a class='ci-result' data-ci href={data.ci.url}>
+        {data.ci.status === 'completed' ? (data.ci.conclusion ?? 'unknown') : data.ci.status} ·{' '}
+        {data.ci.sha.slice(0, 7)}
+      </a>
+      <p>
+        Run updated <span data-ci-date>{data.ci.updatedAt.slice(0, 10)}</span>.
+      </p>
+      <p
+        class='data-note'
+        data-source='ci'
+        data-snapshot='Saved CI information'
+        data-checked='Checked on GitHub'
+      >
+        Saved CI information · {data.ci.checkedAt.slice(0, 10)}
+      </p>
+      <p>
+        CI includes golangci-lint and tests. A main branch result describes that commit; it does not
+        certify a different release or your deployment.
+      </p>
+      <a class='text-link' href='https://github.com/cfgate/cfgate/actions/workflows/ci.yml'>
+        Browse CI runs ↗
+      </a>
+    </section>
+    <section class='content-panel'>
+      <h2>Test coverage</h2>
+      <p>
+        Codecov reports measured coverage for the operator. Read the report for its commit and
+        collection time; it may lag the latest CI run.
+      </p>
+      <a class='coverage-report' href='https://app.codecov.io/gh/cfgate/cfgate/tree/main'>
+        <img
+          src='https://codecov.io/gh/cfgate/cfgate/branch/main/graph/badge.svg'
+          alt='Codecov coverage for main'
+          width='120'
+          height='20'
+          loading='lazy'
+        />
+        <span>Open the main branch coverage report ↗</span>
+      </a>
+      <p>Coverage helps identify untested paths. It is not a security or reliability score.</p>
+      <a class='text-link' href='https://github.com/cfgate/cfgate/blob/main/.golangci.yml'>
+        Lint configuration ↗
+      </a>
+    </section>
+  </div>
+  <section class='content-panel'>
+    <h2>Find a useful contribution.</h2>
+    <p>
+      Bug reproductions, clearer examples, and reports from real deployments are useful alongside
+      code changes. Check existing discussions and the contribution guide before starting a larger
+      change.
+    </p>
+    <div class='resource-links'>
+      <a href='https://github.com/cfgate/cfgate/blob/main/CONTRIBUTING.md'>Contribution guide ↗</a>
+      <a href='https://github.com/cfgate/cfgate/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22'>
+        Beginner issue filter ↗
+      </a>
+      <a href='https://github.com/cfgate/cfgate/issues'>All issues ↗</a>
+    </div>
+    <p class='section-note'>
+      The beginner filter may be empty. The full issue list is the place to check current work.
+    </p>
+  </section>
+  <section class='content-panel'>
+    <h2>Built in the open</h2>
+    <p>
+      The operator, Helm chart, and this website are maintained on GitHub. cfgate uses the Apache
+      2.0 license.
+    </p>
+    <div class='resource-links'>
+      <a href='https://github.com/cfgate/cfgate'>Operator source ↗</a>
+      <a href='https://github.com/cfgate/helm-chart'>Helm chart source ↗</a>
+      <a href='https://github.com/cfgate/cfgate.io'>Website source ↗</a>
+      <a href='https://github.com/cfgate/cfgate/blob/main/LICENSE'>License ↗</a>
+    </div>
+  </section>
+</ProjectPage>

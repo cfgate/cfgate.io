@@ -1153,3 +1153,230 @@ pre {
     outline-color: Highlight;
   }
 }
+
+/* Supporting pages stay quieter than the three workflow cards. */
+.home-release {
+  margin-top: -35px;
+  margin-bottom: 55px;
+}
+.release-strip {
+  padding: 20px 0;
+}
+.release-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 26px;
+  align-items: center;
+}
+.release-links a {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.release-links strong {
+  color: var(--ink);
+  font-weight: 500;
+  margin-left: 6px;
+}
+.release-links a:hover,
+.resource-links a:hover {
+  color: var(--accent);
+}
+.data-note {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 10px;
+}
+.configuration-example {
+  padding-top: 95px;
+}
+.configuration-example h2 {
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: 500;
+  line-height: 1.3;
+  margin-top: 16px;
+  letter-spacing: -0.035em;
+}
+.section-intro {
+  max-width: 700px;
+  margin-top: 18px;
+  color: var(--ink-muted);
+  font-size: 16px;
+}
+.example-grid,
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+  margin-top: 30px;
+}
+.example-grid .terminal-window {
+  align-self: start;
+}
+.example-grid pre {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.example-explanation {
+  padding: 10px 18px;
+}
+.route-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  margin-bottom: 24px;
+}
+.route-flow code {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+.route-flow > span {
+  color: var(--accent);
+}
+.example-explanation dt {
+  font-size: 15px;
+  margin-top: 20px;
+  font-weight: 600;
+}
+.example-explanation dd {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+.section-note {
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin-top: 22px;
+  max-width: 850px;
+}
+.resource-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-top: 20px;
+  font-size: 14px;
+}
+.resource-links a,
+.content-panel > a,
+.release-list a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.detail-header {
+  justify-content: space-between;
+}
+.detail-header .header-nav {
+  margin-left: auto;
+}
+.detail-header [aria-current] {
+  color: var(--accent);
+}
+.detail-page {
+  padding-block: 65px 90px;
+}
+.detail-page h1 {
+  font-size: clamp(40px, 6vw, 64px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  margin-top: 14px;
+}
+.detail-page .release-strip {
+  margin-block: 22px 32px;
+  border-bottom: 1px solid var(--line);
+}
+.content-panel {
+  margin-top: 28px;
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff04, transparent);
+}
+.detail-grid .content-panel {
+  margin-top: 0;
+}
+.content-panel h2 {
+  font-size: 23px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+.content-panel p {
+  margin-top: 15px;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+.content-panel p strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+.content-panel .data-note {
+  font-size: 12px;
+}
+.release-list {
+  list-style: none;
+  padding: 0;
+  margin: 24px 0;
+}
+.release-list li {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.release-list time {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.ci-result {
+  display: inline-block;
+  margin-block: 20px 5px;
+  font: 16px var(--font-code);
+}
+.coverage-report {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 16px;
+  margin-block: 24px;
+  font-size: 14px;
+}
+@media (max-width: 900px) {
+  .home-release {
+    margin-top: -15px;
+    margin-bottom: 30px;
+  }
+  .configuration-example {
+    padding-top: 65px;
+  }
+  .example-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .example-explanation {
+    padding: 0;
+  }
+  .detail-header {
+    padding-block: 18px;
+  }
+  .detail-header .header-nav {
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+  .detail-page {
+    padding-top: 36px;
+  }
+  .content-panel {
+    padding: 24px 20px;
+  }
+}
+@media (forced-colors: active) {
+  .content-panel,
+  .route-flow code {
+    border-color: CanvasText;
+  }
+}

@@ -1,0 +1,29 @@
+---
+import { projectSnapshot as data } from '@/lib/project'
+import { projectCopy } from '@/content/project'
+const locale = (Astro.currentLocale ?? 'en') as keyof typeof projectCopy
+const t = projectCopy[locale] ?? projectCopy.en
+---
+
+<div class='release-strip' data-project-data>
+  <div class='release-links'>
+    <a data-release='operator' href={data.releases.operator[0].url}>
+      {t.operator} <strong data-version>{data.releases.operator[0].version}</strong>
+    </a>
+    <a data-release='chart' href={data.releases.chart[0].url}>
+      {t.chart} <strong data-version>{data.releases.chart[0].version}</strong>
+    </a>
+    <a href='/releases/' hreflang='en'>
+      {t.releases} ↗
+    </a>
+    <a href='/project/' hreflang='en'>
+      {t.project} ↗
+    </a>
+  </div>
+  <p class='data-note' data-source='releases' data-snapshot={t.snapshot} data-checked={t.checked}>
+    {t.snapshot} · {data.releases.checkedAt.slice(0, 10)}
+  </p>
+</div>
+<script>
+  import '@/scripts/project'
+</script>

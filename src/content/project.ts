@@ -1,0 +1,70 @@
+export const projectCopy = {
+  en: {
+    releases: 'Releases',
+    project: 'Project',
+    operator: 'Operator',
+    chart: 'Helm chart',
+    snapshot: 'Saved release information',
+    checked: 'Checked on GitHub',
+    exampleLabel: 'From configuration to infrastructure',
+    exampleTitle: 'A route with a clear destination.',
+    exampleIntro:
+      'This HTTPRoute sends app.example.com to the web Service. cfgate translates it into tunnel ingress configuration.',
+    examplePrereq:
+      'Example fragment: assumes an existing cfgate Gateway named public, an attached tunnel, and a web Service in the same namespace. DNS is managed separately with CloudflareDNS.',
+    route: 'Route',
+    routeText: 'The hostname and backend come from your HTTPRoute.',
+    dns: 'DNS',
+    dnsText: 'A CloudflareDNS resource publishes the hostname through your tunnel.',
+    access: 'Optional Access',
+    accessText:
+      'Add an Access application and policies, then explicitly require protection on the route. Public routes need no Access configuration.',
+    examples: 'Browse complete examples',
+    protection: 'Access configuration guide',
+  },
+  zh: {
+    releases: '版本（英语）',
+    project: '项目（英语）',
+    operator: '控制器',
+    chart: 'Helm Chart',
+    snapshot: '已保存的版本信息',
+    checked: '已在 GitHub 核对',
+    exampleLabel: '从配置到基础设施',
+    exampleTitle: '为路由指定明确的目标。',
+    exampleIntro:
+      '这个 HTTPRoute 将 app.example.com 指向 web Service。cfgate 将其转换为隧道入口配置。',
+    examplePrereq:
+      '示例片段：假定同一命名空间中已有名为 public 的 cfgate Gateway、关联隧道和 web Service。DNS 由 CloudflareDNS 单独管理。',
+    route: '路由',
+    routeText: '主机名和后端来自 HTTPRoute。',
+    dns: 'DNS',
+    dnsText: 'CloudflareDNS 资源通过隧道发布该主机名。',
+    access: '可选的 Access 保护',
+    accessText: '添加 Access 应用与策略，然后在路由上显式要求保护。公开路由无需 Access 配置。',
+    examples: '查看完整示例',
+    protection: 'Access 配置指南',
+  },
+  hi: {
+    releases: 'रिलीज़ (अंग्रेज़ी)',
+    project: 'प्रोजेक्ट (अंग्रेज़ी)',
+    operator: 'ऑपरेटर',
+    chart: 'Helm चार्ट',
+    snapshot: 'सहेजी गई रिलीज़ जानकारी',
+    checked: 'GitHub पर जाँचा गया',
+    exampleLabel: 'कॉन्फ़िगरेशन से इन्फ़्रास्ट्रक्चर तक',
+    exampleTitle: 'route का स्पष्ट गंतव्य।',
+    exampleIntro:
+      'यह HTTPRoute app.example.com को web Service तक भेजता है। cfgate इसे tunnel ingress कॉन्फ़िगरेशन में बदलता है।',
+    examplePrereq:
+      'यह उदाहरण एक अंश है: उसी namespace में public नाम का cfgate Gateway, जुड़ा हुआ tunnel और web Service पहले से होने चाहिए। DNS को CloudflareDNS से अलग प्रबंधित किया जाता है।',
+    route: 'route',
+    routeText: 'होस्टनाम और backend आपके HTTPRoute से आते हैं।',
+    dns: 'DNS',
+    dnsText: 'CloudflareDNS संसाधन tunnel के ज़रिए होस्टनाम प्रकाशित करता है।',
+    access: 'वैकल्पिक Access सुरक्षा',
+    accessText:
+      'Access application और नीतियाँ जोड़ें, फिर route पर सुरक्षा स्पष्ट रूप से आवश्यक करें। सार्वजनिक routes के लिए Access कॉन्फ़िगरेशन ज़रूरी नहीं है।',
+    examples: 'पूरे उदाहरण देखें',
+    protection: 'Access कॉन्फ़िगरेशन गाइड',
+  },
+}

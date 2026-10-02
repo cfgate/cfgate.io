@@ -37,7 +37,7 @@ describe('E2E Route Tests', () => {
       expect(html).toContain(content)
     })
 
-    it('lists exactly the three canonical pages in the sitemap', async () => {
+    it('lists exactly the five canonical pages in the sitemap', async () => {
       const response = await exports.default.fetch('https://cfgate.io/sitemap.xml')
 
       expect(response.status).toBe(200)
@@ -48,9 +48,24 @@ describe('E2E Route Tests', () => {
       expect(urls.sort()).toEqual([
         'https://cfgate.io/',
         'https://cfgate.io/hi/',
+        'https://cfgate.io/project/',
+        'https://cfgate.io/releases/',
         'https://cfgate.io/zh/',
       ])
     })
+
+    it.each(['/releases/', '/project/'])(
+      'serves %s with its own canonical and no false translations',
+      async (path) => {
+        const response = await exports.default.fetch(`https://cfgate.io${path}`)
+        expect(response.status).toBe(200)
+        const html = await response.text()
+        expect(html).toContain(`<link rel="canonical" href="https://cfgate.io${path}">`)
+        expect(html).not.toContain('rel="alternate"')
+        expect(html).toContain('Saved release information')
+        expect(html).toContain('data-project-data')
+      }
+    )
 
     it('includes X-Request-Id header', async () => {
       const response = await exports.default.fetch('https://cfgate.io/')

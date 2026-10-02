@@ -1,0 +1,72 @@
+---
+import ProjectPage from '@/layouts/ProjectPage.astro'
+import { projectSnapshot as data } from '@/lib/project'
+---
+
+<ProjectPage
+  title='Releases'
+  description='Published operator and Helm chart releases, with installation and upgrade references.'
+>
+  <section class='content-panel pairing' aria-labelledby='pairing-title'>
+    <h2 id='pairing-title'>Choose a matching chart and operator.</h2>
+    <p>
+      Chart{' '}
+      <a data-release='chart' href={data.releases.chart[0].url}>
+        <strong data-version>{data.releases.chart[0].version}</strong>
+      </a>{' '}
+      declares cfgate <strong data-chart-app>{data.releases.chartAppVersion}</strong> as its
+      application version. An explicit image override can change what your installation runs.
+    </p>
+    <p>
+      cfgate is an alpha release. Review the release notes, supported combinations, and ownership
+      requirements before upgrading. Keep the controller, CRDs, and RBAC aligned.
+    </p>
+    <div class='resource-links'>
+      <a href='https://github.com/cfgate/cfgate/blob/main/docs/compatibility.md'>
+        Compatibility policy ↗
+      </a>
+      <a href='https://github.com/cfgate/cfgate/blob/main/docs/authorization-and-ownership.md'>
+        Ownership and migration ↗
+      </a>
+      <a href='https://github.com/cfgate/helm-chart#installation'>Chart documentation ↗</a>
+    </div>
+  </section>
+  <div class='detail-grid'>
+    {(['operator', 'chart'] as const).map((kind) => (
+      <section class='content-panel'>
+        <h2>{kind === 'operator' ? 'Operator' : 'Helm chart'}</h2>
+        <p>Published releases, including prereleases. Full notes live on GitHub.</p>
+        <ul class='release-list' data-release-list={kind}>
+          {data.releases[kind].map((release) => (
+            <li>
+              <a href={release.url}>{release.version}</a>
+              <time datetime={release.published}>{release.published.slice(0, 10)}</time>
+            </li>
+          ))}
+        </ul>
+        <a
+          class='text-link'
+          href={`https://github.com/cfgate/${kind === 'operator' ? 'cfgate' : 'helm-chart'}/releases`}
+        >
+          All releases ↗
+        </a>
+      </section>
+    ))}
+  </div>
+  <section class='content-panel'>
+    <h2>Packages and installation</h2>
+    <p>
+      Use the existing installation guide for prerequisites and setup. Artifact Hub provides package
+      metadata and discovery; GitHub release notes remain the source for changes.
+    </p>
+    <div class='resource-links'>
+      <a href='https://github.com/cfgate/cfgate#quick-start'>Quick start ↗</a>
+      <a href='https://artifacthub.io/packages/helm/helm-chart-cfgate/cfgate'>
+        Helm on Artifact Hub ↗
+      </a>
+      <a href='https://artifacthub.io/packages/container/cfgate/cfgate'>
+        Operator on Artifact Hub ↗
+      </a>
+    </div>
+  </section>
+</ProjectPage>
