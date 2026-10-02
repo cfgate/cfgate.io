@@ -13,6 +13,7 @@ on:
       - 'eslint.config.ts'
       - 'wrangler.toml'
       - 'pnpm-workspace.yaml'
+      - '.node-version'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/ci.yml'
@@ -28,6 +29,7 @@ on:
       - 'eslint.config.ts'
       - 'wrangler.toml'
       - 'pnpm-workspace.yaml'
+      - '.node-version'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/ci.yml'
@@ -51,7 +53,7 @@ jobs:
 
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version-file: 'package.json'
+          node-version-file: '.node-version'
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile

@@ -13,8 +13,8 @@ Project website, Go vanity imports, and release proxy for [cfgate](https://githu
 
 ## Development
 
-Use Node.js 24.16.0 or newer within the 24.x line and the pnpm version pinned in
-`package.json`.
+Use the Node.js version in `.node-version` and the pnpm version pinned by
+`packageManager` in `package.json`.
 
 ```sh
 pnpm install
@@ -72,7 +72,34 @@ sizes must be set explicitly when a tiling window manager is active.
 
 ## Deploy
 
-Deployed automatically via Cloudflare Workers Git integration on push to `main`.
+Cloudflare Workers Builds connects `cfgate/cfgate.io` to the existing
+`cfgate-service-worker` in the inherent.design account. Pushes to `main` build and
+deploy to `cfgate.io`. GitHub Actions validates changes; Cloudflare handles
+deployment. Merge after PR checks pass: a push to `main` triggers deployment
+independently of GitHub Actions.
+
+Settings live under **Workers & Pages → cfgate-service-worker → Settings → Builds**:
+
+| Setting           | Value                       |
+| ----------------- | --------------------------- |
+| Production branch | `main`                      |
+| Root directory    | `/` (repository root)       |
+| Build command     | `pnpm run build`            |
+| Deploy command    | `pnpm exec wrangler deploy` |
+
+The GitHub App grants repository access; Cloudflare's generated build token
+authorizes deployment. Local SOPS credentials and GitHub Actions deployment
+secrets are not required. `wrangler.toml` defines the Worker, `dist` assets, and
+custom domain. The deploy command above avoids repeating the build already run
+by the build command; `pnpm run deploy` remains the manual build-and-deploy path.
+
+[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)
+selects Node from `.node-version`; GitHub Actions uses the same file. pnpm's
+[version management](https://pnpm.io/settings/cli#pmonfail) selects the
+`packageManager` pin in `package.json`. Tool versions are maintained in Git.
+When upgrading, update these pins and the lockfile as appropriate, keeping Node
+within `engines.node`. Verify the selected versions and deployed commit in
+Cloudflare's build history.
 
 ## Project information
 
