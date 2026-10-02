@@ -1,6 +1,8 @@
 # cfgate.io
 
-[![CI](https://img.shields.io/github/actions/workflow/status/cfgate/cfgate.io/ci.yml?style=flat)](https://github.com/cfgate/cfgate.io/actions/workflows/ci.yml) [![License](https://img.shields.io/github/license/cfgate/cfgate.io?style=flat)](LICENSE)
+[![Website](https://img.shields.io/badge/website-cfgate.io-F6821F?style=flat&logo=cloudflare&logoColor=white)](https://cfgate.io) [![License](https://img.shields.io/github/license/cfgate/cfgate.io?style=flat)](LICENSE)
+
+[![Build Status](https://img.shields.io/github/actions/workflow/status/cfgate/cfgate.io/ci.yml?branch=main&style=flat)](https://github.com/cfgate/cfgate.io/actions/workflows/ci.yml) [![Security Scan](https://img.shields.io/github/actions/workflow/status/cfgate/cfgate.io/security-scan.yml?branch=main&style=flat&label=security%20scan)](https://github.com/cfgate/cfgate.io/actions/workflows/security-scan.yml)
 
 Project website, Go vanity imports, and release proxy for [cfgate](https://github.com/cfgate/cfgate).
 
@@ -100,6 +102,9 @@ selects Node from `.node-version`; GitHub Actions uses the same file. pnpm's
 When upgrading, update these pins and the lockfile as appropriate, keeping Node
 within `engines.node`. Verify the selected versions and deployed commit in
 Cloudflare's build history.
+
+Use `pnpm tail` (or its `pnpm tail:prod` alias) for production logs. Production
+uses the root Wrangler configuration; there is no named `production` environment.
 
 ## Project information
 
