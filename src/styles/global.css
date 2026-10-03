@@ -1221,19 +1221,30 @@ pre {
 }
 .example-explanation {
   padding: 10px 18px;
+  min-width: 0;
 }
 .route-flow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 12px;
+  gap: 4px;
+  white-space: nowrap;
+  overflow-x: auto;
+  font: 12px/1.65 var(--font-code);
+  padding-bottom: 6px;
   margin-bottom: 24px;
+}
+.route-flow > * {
+  flex: none;
+}
+.route-flow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
 }
 .route-flow code {
   background: var(--surface-raised);
   border: 1px solid var(--line);
-  padding: 8px 10px;
+  padding: 8px 6px;
+  font: inherit;
   border-radius: 6px;
 }
 .route-flow > span {

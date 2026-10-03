@@ -28,7 +28,12 @@ spec:
       <pre><code>{example}</code></pre>
     </div>
     <div class='example-explanation'>
-      <div class='route-flow' aria-label='app.example.com → tunnel → web:8080'>
+      <div
+        class='route-flow'
+        role='group'
+        tabindex='0'
+        aria-label='app.example.com → cloudflared → web:8080'
+      >
         <code>app.example.com</code>
         <span aria-hidden='true'>→</span>
         <code>cloudflared</code>
