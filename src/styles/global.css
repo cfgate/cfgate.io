@@ -512,23 +512,23 @@ button:focus-visible {
   position: absolute;
   border: 1px solid #8b879c3d;
   border-radius: 50%;
-  top: 50%;
+  aspect-ratio: 1;
+  top: 46%;
   left: 50%;
   transform: translate(-50%, -50%);
 }
 .orbit-outer {
-  width: 200px;
-  height: 170px;
+  width: 180px;
 }
 .orbit-inner {
-  width: 142px;
-  height: 122px;
+  width: 140px;
   border-style: dashed;
 }
 .shield-emblem {
   position: absolute;
-  top: 56px;
-  left: calc(50% - 46px);
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   width: 92px;
   height: 96px;
   display: grid;
@@ -587,12 +587,14 @@ button:focus-visible {
 }
 .connection-lines {
   position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
 }
 .connection-path {
   stroke: #783509;
   stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
 }
 .connection-return {
   stroke-dasharray: 3 5;
@@ -622,19 +624,20 @@ button:focus-visible {
   font: 10px var(--font-code);
 }
 .node-cluster {
-  left: 10px;
-  top: 112px;
-  transform: rotate(-7deg);
+  left: 15%;
+  top: 70%;
+  transform: translate(-50%, -50%) rotate(-7deg);
 }
 .node-cloud {
-  right: 11px;
-  top: 29px;
-  transform: rotate(7deg);
+  left: 85%;
+  top: 29%;
+  transform: translate(-50%, -50%) rotate(7deg);
 }
 .sync-chip {
   position: absolute;
-  top: 89px;
-  left: calc(50% - 29px);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
   gap: 4px;
