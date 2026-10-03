@@ -48,21 +48,32 @@ function startCardMotion() {
     }
     updateVisibility()
   })
-  const focus = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries)
-        entry.target.toggleAttribute('data-focused', entry.isIntersecting)
-    },
-    { rootMargin: `-${window.innerHeight * 0.42}px 0px -${window.innerHeight * 0.42}px 0px` }
-  )
-  for (const card of cards) {
-    visibility.observe(card)
-    focus.observe(card)
+  let focus: IntersectionObserver | undefined
+  let resizeFrame = 0
+  const updateFocusBoundary = () => {
+    focus?.disconnect()
+    focus = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries)
+          entry.target.toggleAttribute('data-focused', entry.isIntersecting)
+      },
+      { rootMargin: `-${window.innerHeight * 0.42}px 0px -${window.innerHeight * 0.42}px 0px` }
+    )
+    for (const card of cards) focus.observe(card)
   }
+  const resize = () => {
+    cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(updateFocusBoundary)
+  }
+  for (const card of cards) visibility.observe(card)
+  updateFocusBoundary()
+  window.addEventListener('resize', resize)
   document.addEventListener('visibilitychange', updateVisibility)
   stopCardMotion = () => {
     visibility.disconnect()
-    focus.disconnect()
+    focus?.disconnect()
+    cancelAnimationFrame(resizeFrame)
+    window.removeEventListener('resize', resize)
     document.removeEventListener('visibilitychange', updateVisibility)
     for (const card of cards) {
       card.removeAttribute('data-visible')
@@ -72,7 +83,6 @@ function startCardMotion() {
 }
 startCardMotion()
 reducedMotion.addEventListener('change', startCardMotion)
-window.addEventListener('resize', startCardMotion)
 window.addEventListener('pagehide', () => stopCardMotion?.())
 window.addEventListener('pageshow', (event) => {
   if (event.persisted) startCardMotion()
