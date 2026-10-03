@@ -62,8 +62,11 @@ and motion roles live in `src/styles/global.css`. Keep copy concrete and direct:
 describe what users configure and what cfgate manages, without repeated slogans.
 Keep workflow headings and card captions at least 12px across breakpoints.
 
-Anime.js provides a one-shot introduction, respects reduced motion, and cleans up
-on page exit. Gloss and highlights are static CSS. Content and navigation work
+Anime.js provides a one-shot introduction. CSS adds gentle card drift and artwork
+motion on desktop hover or mobile viewport focus. Motion pauses offscreen and in
+hidden tabs, and stays disabled when reduced motion is requested. Observers clean
+up on page exit and restart after back/forward restoration. Gloss and highlights
+remain static. Content and navigation work
 without JavaScript; the copy button is enabled only when the Clipboard API is
 available. Keep the Configure → Secure → Deploy story clear that Access is opt-in
 and cfgate reconciles infrastructure configuration, not application workloads.

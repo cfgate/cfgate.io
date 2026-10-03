@@ -516,6 +516,7 @@ button:focus-visible {
   top: 46%;
   left: 50%;
   transform: translate(-50%, -50%);
+  z-index: 1;
 }
 .orbit-outer {
   width: 180px;
@@ -529,6 +530,7 @@ button:focus-visible {
   top: 46%;
   left: 50%;
   transform: translate(-50%, -50%);
+  z-index: 2;
   width: 92px;
   height: 96px;
   display: grid;
@@ -561,15 +563,22 @@ button:focus-visible {
   font: 10px var(--font-code);
   color: #575060;
 }
+.policy-orbit {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 46%;
+  z-index: 3;
+  pointer-events: none;
+}
 .chip-one {
-  left: 8px;
-  top: 57px;
-  transform: rotate(-7deg);
+  left: calc(50% - 83px);
+  top: calc(46% - 35px);
+  transform: translate(-50%, -50%) rotate(-7deg);
 }
 .chip-two {
-  right: 5px;
-  bottom: 52px;
-  transform: rotate(6deg);
+  left: calc(50% + 83px);
+  top: calc(46% + 35px);
+  transform: translate(-50%, -50%) rotate(6deg);
 }
 .chip-dot {
   width: 4px;
@@ -651,6 +660,153 @@ button:focus-visible {
 .sync-chip .icon {
   width: 12px;
   height: 12px;
+}
+/* Card details share one activation state; reduced motion stays completely still. */
+.security-pulses {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+.security-pulses i {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  width: 100px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, #77718008 40%, #77718055 75%, transparent 76%);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .workflow-card {
+    --drift-distance: 3px;
+    --art-play: paused;
+    --sheet-separation: 0px;
+    --pulse-opacity: 0;
+    animation: card-drift 4s linear infinite alternate paused;
+  }
+  .card-secure {
+    animation-delay: -2.6s;
+  }
+  .card-deploy {
+    animation-delay: -5.2s;
+  }
+  .workflow-card[data-visible] {
+    animation-play-state: running;
+  }
+  .sheet-back,
+  .sheet-front {
+    transition: translate 450ms ease-in-out;
+  }
+  .sheet-back {
+    translate: 0 calc(-1 * var(--sheet-separation));
+  }
+  .sheet-front {
+    translate: 0 var(--sheet-separation);
+  }
+  .policy-orbit {
+    --orbit-turn: 10deg;
+    animation: policy-orbit 4.8s ease-in-out infinite alternate;
+    animation-play-state: var(--art-play);
+  }
+  .orbit-policy {
+    --orbit-turn: -10deg;
+  }
+  .security-pulses {
+    opacity: var(--pulse-opacity);
+    transition: opacity 250ms ease-out;
+  }
+  .security-pulses i {
+    animation: security-pulse 3.6s linear infinite;
+    animation-play-state: var(--art-play);
+  }
+  .security-pulses i:nth-child(2) {
+    animation-delay: 0.33s;
+  }
+  .security-pulses i:nth-child(3) {
+    animation-delay: 0.66s;
+  }
+  .network-node {
+    animation: node-wobble 2.8s ease-in-out infinite alternate;
+    animation-play-state: var(--art-play);
+  }
+  .node-cluster {
+    --node-tilt: -7deg;
+    --node-swing: 1.2deg;
+  }
+  .node-cloud {
+    --node-tilt: 7deg;
+    --node-swing: -1.2deg;
+  }
+  .connection-return {
+    animation: return-flow 800ms linear infinite;
+    animation-play-state: var(--art-play);
+  }
+  @media (hover: hover) and (pointer: fine) and (min-width: 901px) {
+    .workflow-card[data-visible]:hover {
+      --art-play: running;
+      --sheet-separation: 4px;
+      --pulse-opacity: 1;
+    }
+  }
+  @media (hover: none), (pointer: coarse), (max-width: 900px) {
+    .workflow-card {
+      --drift-distance: 1.5px;
+    }
+    .workflow-card[data-visible][data-focused] {
+      --art-play: running;
+      --sheet-separation: 3px;
+      --pulse-opacity: 1;
+    }
+  }
+}
+@keyframes card-drift {
+  from {
+    translate: 0 0;
+  }
+  to {
+    translate: 0 calc(-1 * var(--drift-distance));
+  }
+}
+@keyframes policy-orbit {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: var(--orbit-turn);
+  }
+}
+@keyframes security-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.65);
+    opacity: 0;
+  }
+  2% {
+    opacity: 0.55;
+  }
+  10%,
+  100% {
+    transform: translate(-50%, -50%) scale(1.95);
+    opacity: 0;
+  }
+}
+@keyframes node-wobble {
+  from {
+    transform: translate(-50%, -50%) rotate(var(--node-tilt));
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(calc(var(--node-tilt) + var(--node-swing)));
+  }
+}
+@keyframes return-flow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -8;
+  }
 }
 .workflow-note {
   color: var(--ink-muted);

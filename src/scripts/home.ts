@@ -27,6 +27,57 @@ scope.add((self) => {
 })
 window.addEventListener('pagehide', () => scope.revert(), { once: true })
 
+// CSS owns the motion; observers only gate visibility and touch viewport focus.
+const cards = [...document.querySelectorAll<HTMLElement>('.workflow-card')]
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+let stopCardMotion: (() => void) | undefined
+function startCardMotion() {
+  stopCardMotion?.()
+  if (reducedMotion.matches) return
+
+  const visible = new Set<Element>()
+  const updateVisibility = () => {
+    for (const card of cards) {
+      card.toggleAttribute('data-visible', visible.has(card) && !document.hidden)
+    }
+  }
+  const visibility = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) visible.add(entry.target)
+      else visible.delete(entry.target)
+    }
+    updateVisibility()
+  })
+  const focus = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries)
+        entry.target.toggleAttribute('data-focused', entry.isIntersecting)
+    },
+    { rootMargin: `-${window.innerHeight * 0.42}px 0px -${window.innerHeight * 0.42}px 0px` }
+  )
+  for (const card of cards) {
+    visibility.observe(card)
+    focus.observe(card)
+  }
+  document.addEventListener('visibilitychange', updateVisibility)
+  stopCardMotion = () => {
+    visibility.disconnect()
+    focus.disconnect()
+    document.removeEventListener('visibilitychange', updateVisibility)
+    for (const card of cards) {
+      card.removeAttribute('data-visible')
+      card.removeAttribute('data-focused')
+    }
+  }
+}
+startCardMotion()
+reducedMotion.addEventListener('change', startCardMotion)
+window.addEventListener('resize', startCardMotion)
+window.addEventListener('pagehide', () => stopCardMotion?.())
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) startCardMotion()
+})
+
 const button = document.querySelector<HTMLButtonElement>('[data-copy]')
 const command = document.querySelector<HTMLElement>('#install-command')
 const feedback = document.querySelector<HTMLElement>('[data-copy-feedback]')
