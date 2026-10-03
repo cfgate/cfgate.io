@@ -58,10 +58,7 @@ const { kind, label } = Astro.props
         {/* Percentage coordinates share the node anchors in global.css. */}
         <svg class='connection-lines' viewBox='0 0 100 100' preserveAspectRatio='none' fill='none'>
           <path class='connection-path' d='M15 70 H38 Q50 70 50 54 V40 Q50 29 62 29 H85' />
-          <path
-            class='connection-path connection-return'
-            d='M85 29 H91 Q97 29 97 41 V69 Q97 80 89 80 H15 V70'
-          />
+          <path class='connection-path connection-return' d='M85 29 V68 Q85 80 73 80 H15 V70' />
         </svg>
         <div class='network-node node-cluster'>
           <Icon name='stack' />
