@@ -39,16 +39,25 @@ const { kind, label } = Astro.props
     )}
     {kind === 'secure' && (
       <>
+        <div class='security-pulses'>
+          <i />
+          <i />
+          <i />
+        </div>
         <div class='security-orbit orbit-outer' />
         <div class='security-orbit orbit-inner' />
         <div class='shield-emblem'>
           <Icon name='shield' />
         </div>
-        <span class='policy-chip chip-one'>
-          <span class='chip-dot' /> identity
+        <span class='policy-orbit orbit-identity'>
+          <span class='policy-chip chip-one'>
+            <span class='chip-dot' /> identity
+          </span>
         </span>
-        <span class='policy-chip chip-two'>
-          <span class='chip-dot' /> policy
+        <span class='policy-orbit orbit-policy'>
+          <span class='policy-chip chip-two'>
+            <span class='chip-dot' /> policy
+          </span>
         </span>
         <span class='security-caption'>Cloudflare Access</span>
       </>
