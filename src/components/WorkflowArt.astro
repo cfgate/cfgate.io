@@ -55,9 +55,13 @@ const { kind, label } = Astro.props
     )}
     {kind === 'deploy' && (
       <>
-        <svg class='connection-lines' viewBox='0 0 300 180' fill='none'>
-          <path class='connection-path' d='M58 126 H112 Q150 126 150 90 V62 Q150 42 180 42 H242' />
-          <path class='connection-path connection-return' d='M242 56 V116 Q242 138 216 138 H165' />
+        {/* Percentage coordinates share the node anchors in global.css. */}
+        <svg class='connection-lines' viewBox='0 0 100 100' preserveAspectRatio='none' fill='none'>
+          <path class='connection-path' d='M15 70 H38 Q50 70 50 54 V40 Q50 29 62 29 H85' />
+          <path
+            class='connection-path connection-return'
+            d='M85 29 H91 Q97 29 97 41 V69 Q97 80 89 80 H15 V70'
+          />
         </svg>
         <div class='network-node node-cluster'>
           <Icon name='stack' />
