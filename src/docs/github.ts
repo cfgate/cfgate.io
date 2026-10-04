@@ -127,7 +127,7 @@ export class Github {
     if (!operator.length) throw new Error('No eligible operator release')
     const operatorSource = await this.pin('cfgate/cfgate', operator[0].tag_name)
     let chartAppVersion = ''
-    for (const release of chart.slice(0, 30)) {
+    for (const release of chart) {
       const chartSource = await this.pin('cfgate/helm-chart', release.tag_name)
       const metadata = z
         .object({ appVersion: z.string(), version: z.string() })
