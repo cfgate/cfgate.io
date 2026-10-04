@@ -5,6 +5,7 @@ import { normalizeMarkdown } from '../../scripts/docs/markdown'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import { preserveHeadingIds } from '../../docs/integration/headings'
+import { validateExamples } from '../../scripts/docs/examples'
 import { schemaReference } from '../../scripts/docs/reference'
 const target = targetSchema.parse(bootstrap)
 describe('source-aware Markdown', () => {
@@ -53,6 +54,65 @@ describe('source-aware Markdown', () => {
     expect(
       headings.map((node) => (node.data as { hProperties?: { id?: string } })?.hProperties?.id)
     ).toEqual(['example-1', 'example-2'])
+  })
+  it('rejects a missing Markdown page instead of hiding it behind a source link', () => {
+    expect(() =>
+      normalizeMarkdown(
+        '# X\n\n[Missing](missing.md)',
+        'docs/x.md',
+        target.operatorSource,
+        target,
+        new Map(),
+        new Map()
+      )
+    ).toThrow('Missing documentation page')
+  })
+  it('allows an intentionally unlisted Markdown file only when the pinned tree contains it', () => {
+    const result = normalizeMarkdown(
+      '# X\n\n[Changes](CHANGELOG.md)',
+      'README.md',
+      target.operatorSource,
+      target,
+      new Map(),
+      new Map(),
+      new Set(['CHANGELOG.md'])
+    )
+    expect(result.markdown).toContain(`${target.operatorSource.commit}/CHANGELOG.md`)
+  })
+  it('rejects unknown cfgate example identities while allowing other Kubernetes resources', () => {
+    const schema = `spec:
+  group: cfgate.io
+  names: {kind: CloudflareTunnel}
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema: {type: object}
+`
+    for (const [apiVersion, kind] of [
+      ['cfgate.io/v99', 'CloudflareTunnel'],
+      ['cfgate.io/v1alpha1', 'CloudflareTunnell'],
+      ['cfgat.io/v1alpha1', 'CloudflareTunnel'],
+    ]) {
+      expect(() =>
+        validateExamples(
+          new Map([
+            ['config/crd/bases/tunnels.yaml', schema],
+            ['examples/basic/tunnel.yaml', `apiVersion: ${apiVersion}\nkind: ${kind}`],
+          ])
+        )
+      ).toThrow('Unknown cfgate resource identity')
+    }
+    expect(
+      validateExamples(
+        new Map([
+          ['config/crd/bases/tunnels.yaml', schema],
+          [
+            'examples/basic/resources.yaml',
+            'apiVersion: v1\nkind: Service\n---\napiVersion: cfgate.io/v1alpha1\nkind: CloudflareTunnel',
+          ],
+        ])
+      )
+    ).toBe(1)
   })
   it('isolates historical fixture links by logical page identity', () => {
     const historical = targetSchema.parse({

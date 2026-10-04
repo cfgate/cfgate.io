@@ -56,9 +56,12 @@ export interface CoordinatorSignals {
 }
 export interface CoordinatorStorage {
   transaction<T>(
-    operation: (txn: Pick<CoordinatorStorage, 'get' | 'put'>) => Promise<T>
+    operation: (
+      txn: Pick<CoordinatorStorage, 'get' | 'put' | 'getAlarm' | 'setAlarm'>
+    ) => Promise<T>
   ): Promise<T>
   get<T>(key: string): Promise<T | undefined>
   put(key: string, value: unknown): Promise<void>
+  getAlarm(): Promise<number | null>
   setAlarm(time: number): Promise<void>
 }

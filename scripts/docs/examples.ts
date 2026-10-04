@@ -9,9 +9,13 @@ export function validateExamples(files: Map<string, string>): number {
   const ajv = new Ajv({ strict: false, allErrors: true, useDefaults: true })
   addFormats(ajv)
   const schemas = new Map()
+  const groups = new Set<string>()
+  const kinds = new Set<string>()
   for (const [path, contents] of files)
     if (path.startsWith('config/crd/bases/')) {
       const crd = parseAllDocuments(contents)[0].toJS()
+      groups.add(crd.spec.group)
+      kinds.add(crd.spec.names.kind)
       for (const version of crd.spec.versions)
         schemas.set(
           `${crd.spec.group}/${version.name}:${crd.spec.names.kind}`,
@@ -38,6 +42,15 @@ export function validateExamples(files: Map<string, string>): number {
       if (!value || typeof value !== 'object' || !value.apiVersion || !value.kind) continue
       substitutePlaceholders(value)
       const validate = schemas.get(`${value.apiVersion}:${value.kind}`)
+      if (
+        !validate &&
+        (groups.has(String(value.apiVersion).split('/')[0]) ||
+          kinds.has(value.kind) ||
+          String(value.kind).startsWith('Cloudflare'))
+      )
+        throw new Error(
+          `Unknown cfgate resource identity: ${path}: ${value.apiVersion}:${value.kind}`
+        )
       if (validate && !validate(value))
         throw new Error(
           `Example does not match released schema: ${path}: ${JSON.stringify(validate.errors)}`
