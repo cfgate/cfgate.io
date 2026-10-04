@@ -44,9 +44,7 @@ export function validateExamples(files: Map<string, string>): number {
       const validate = schemas.get(`${value.apiVersion}:${value.kind}`)
       if (
         !validate &&
-        (groups.has(String(value.apiVersion).split('/')[0]) ||
-          kinds.has(value.kind) ||
-          String(value.kind).startsWith('Cloudflare'))
+        (groups.has(String(value.apiVersion).split('/')[0]) || kinds.has(value.kind))
       )
         throw new Error(
           `Unknown cfgate resource identity: ${path}: ${value.apiVersion}:${value.kind}`
