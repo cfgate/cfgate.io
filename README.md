@@ -4,37 +4,36 @@
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/cfgate/cfgate.io/ci.yml?branch=main&style=flat)](https://github.com/cfgate/cfgate.io/actions/workflows/ci.yml) [![Security Scan](https://img.shields.io/github/actions/workflow/status/cfgate/cfgate.io/security-scan.yml?branch=main&style=flat&label=security%20scan)](https://github.com/cfgate/cfgate.io/actions/workflows/security-scan.yml)
 
-Project website, Go vanity imports, and release proxy for [cfgate](https://github.com/cfgate/cfgate).
+This repository serves the [cfgate website](https://cfgate.io), project information,
+Go vanity imports, and Kubernetes release manifests through a Cloudflare Worker.
+Operator installation and configuration belong in the
+[cfgate documentation](https://github.com/cfgate/cfgate/tree/main/docs).
 
-## Stack
+## Local development
 
-- [Astro](https://astro.build) 7 static site with Tailwind CSS 4
-- [Cloudflare Workers](https://workers.cloudflare.com) hosting
-- Go vanity import meta tags (`go get cfgate.io/cfgate`)
-- Release artifact proxy (`/install.yaml`, `/crds.yaml`, `/crds/*`)
-
-## Development
-
-Use the Node.js version in `.node-version` and the pnpm version pinned by
-`packageManager` in `package.json`.
+Use `.node-version` for Node.js and the `packageManager` pin in `package.json` for
+pnpm. Install dependencies and start the page preview:
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm dev` previews Astro pages only. To exercise the Worker routes and built
-assets together:
+The Astro preview serves pages. To test the Worker routes and built pages together:
 
 ```sh
 pnpm build
 pnpm exec wrangler dev --local
 ```
 
+Neither preview deploys to Cloudflare. Project information uses public GitHub
+endpoints; it does not require a provider token.
+
 ## Validation
 
+Run the same checks used for pull requests, then validate the Worker bundle:
+
 ```sh
-pnpm install --frozen-lockfile
 pnpm lint
 pnpm typecheck
 pnpm build
@@ -42,116 +41,151 @@ pnpm test
 pnpm exec wrangler deploy --dry-run
 ```
 
-Tests run locally in the Workers runtime using `@cloudflare/vitest-plugin`.
-The route suite needs built assets; its release-proxy smoke checks contact GitHub
-and accept upstream errors, so they do not establish release artifact availability.
+Tests use the local Workers runtime through `@cloudflare/vitest-plugin`. Build the
+pages before running the route suite. Release-proxy smoke tests contact GitHub and
+accept upstream errors; they test route registration, not artifact availability.
+The project-cache regressions use the application middleware, including request
+IDs, and check cache misses, cache hits, concurrent requests, and dated fallbacks.
 
-Keep Vitest and its runner/snapshot packages on compatible 4.1 releases until the
-Cloudflare plugin supports Vitest 5. TypeScript 6 is the supported intersection of
-Astro's checker and typescript-eslint; TypeScript 7 is not yet supported by those
-packages. Node types follow the Node 24 runtime. pnpm 12 uses `allowBuilds` in
-`pnpm-workspace.yaml`; only the existing native build tools are allowed. Explicit
-release-age exceptions are version-scoped to the selected upgrades.
+## Application structure
 
-## Website design
+| Location                | Responsibility                                           |
+| ----------------------- | -------------------------------------------------------- |
+| `src/pages/`            | Static Astro pages                                       |
+| `src/components/`       | Shared page structure, icons, and workflow illustrations |
+| `src/content/`          | English, Chinese, and Hindi copy                         |
+| `src/styles/global.css` | Semantic color, typography, and motion styles            |
+| `src/scripts/`          | Browser enhancements and project-data refresh            |
+| `src/index.ts`          | Worker routes and middleware                             |
+| `src/handlers/`         | Project API, asset serving, redirects, and release proxy |
+| `src/lib/project.ts`    | GitHub data fetching and validation                      |
+| `src/data/project.json` | Dated fallback project information                       |
 
-The landing page is static Astro, with shared English, Chinese, and Hindi copy in
-`src/content/home.ts`. `Home.astro` composes the page; `WorkflowArt.astro` and
-`Icon.astro` supply the small reusable illustrations. Semantic color, typography,
-and motion roles live in `src/styles/global.css`. Keep copy concrete and direct:
-describe what users configure and what cfgate manages, without repeated slogans.
-Keep workflow headings and card captions at least 12px across breakpoints.
+Astro renders the pages; Tailwind CSS supplies styling. The Worker serves the
+built `dist` directory and these additional routes:
 
-Anime.js provides a one-shot introduction. CSS adds gentle card drift and artwork
-motion on desktop hover or mobile viewport focus. Motion pauses offscreen and in
-hidden tabs, and stays disabled when reduced motion is requested. Observers clean
-up on page exit and restart after back/forward restoration. Gloss and highlights
-remain static. Content and navigation work
-without JavaScript; the copy button is enabled only when the Clipboard API is
-available. Keep the Configure → Secure → Deploy story clear that Access is opt-in
-and cfgate reconciles infrastructure configuration, not application workloads.
+| Route                                                  | Behavior                                                                                          |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `/api/project`                                         | Release information, chart/operator pairing, and operator CI status                               |
+| `/install.yaml`, `/crds.yaml`, `/crds/*`               | Proxy the corresponding GitHub `releases/latest` asset; upstream fetch cache lifetime is one hour |
+| `/?go-get=1`, `/cfgate?go-get=1`, `/cfgate/*?go-get=1` | Go import metadata for `cfgate.io/cfgate`                                                         |
+| `/cfgate`, `/cfgate/*`                                 | Browser redirects to pkg.go.dev                                                                   |
 
-Before shipping visual changes, inspect all three languages on desktop and mobile,
-keyboard focus, reduced motion, and the no-JavaScript fallback. Browser viewport
-sizes must be set explicitly when a tiling window manager is active.
+For a specific operator version, use that GitHub release's download links. The
+release proxy does not select a version from the website's project-data response.
 
-## Deploy
+## Project-data refresh
 
-Cloudflare Workers Builds connects `cfgate/cfgate.io` to the existing
-`cfgate-service-worker` in the inherent.design account. Pushes to `main` build and
-deploy to `cfgate.io`. GitHub Actions validates changes; Cloudflare handles
-deployment. Merge after PR checks pass: a push to `main` triggers deployment
-independently of GitHub Actions.
+Pages initially render the bundled snapshot. JavaScript requests `/api/project`
+once per page load, with an eight-second timeout; it does not poll while the page
+stays open. If the request fails, the displayed content remains unchanged.
 
-Settings live under **Workers & Pages → cfgate-service-worker → Settings → Builds**:
+On a Worker cache miss, the API fetches the operator and chart release lists,
+reads `appVersion` from the published chart's `Chart.yaml`, and reads the latest
+operator CI run on `main`. Those requests share a six-second deadline. Each list
+contains up to three published releases, including prereleases. Release data and
+CI data fall back independently if fetching or validation fails. Fallback data
+keeps its original timestamp rather than presenting an old value as newly checked.
+
+The Worker stores the resulting JSON for **30 minutes per Cloudflare location**,
+including responses containing fallback data. The next request after expiry
+refreshes it; there is no timer or release webhook. Query strings share the same
+cache key. Concurrent misses share one refresh within a Worker instance, but
+separate instances or locations may fetch independently. This cache is temporary
+and can be evicted before its lifetime expires.
+
+Browser responses use `Cache-Control: no-cache`, so subsequent page loads
+revalidate with the Worker instead of adding a browser freshness period. The
+stored Worker response has its own 30-minute cache directive. Request IDs are
+added to a writable response; they are not stored in the project cache. Unhandled
+errors return 503 with `no-store` and without stale cache or entity headers.
+
+Cloudflare zone settings are separate from this repository. The observed zone
+Browser Cache TTL is four hours; it previously lengthened the browser-facing
+`max-age`. After deploying cache changes, verify the live headers rather than
+assuming the repository alone controls every cache layer. Keep API errors
+uncacheable and avoid a zone rule that overrides the API's revalidation policy.
+
+Successful live sections report `source: github`; bundled sections report
+`source: snapshot`. The page uses text nodes to display these values. Codecov
+badges and Artifact Hub links are separate signals, not deployment health checks.
+
+To update the snapshot, verify release tags, publication dates, the chart's
+operator pairing, and the CI run's SHA, URL, and time. Save the retrieval time and
+keep `source: snapshot`. Do not change timestamps for data that was not rechecked.
+
+## Design and writing
+
+Use semantic styles and shared components rather than page-specific copies.
+Describe what users configure and what cfgate manages. Access protection is
+opt-in; cfgate reconciles Cloudflare configuration and connector workloads, not
+application Deployments. Keep installation instructions in the operator docs so
+there is one maintained source for them.
+
+Workflow captions and headings remain at least 12px across breakpoints. Anime.js
+runs the introduction; CSS supplies card drift and hover or viewport motion.
+Motion pauses offscreen and in hidden tabs, respects reduced-motion preferences,
+and resumes after back/forward navigation. Gloss and highlights remain static.
+Navigation and content work without JavaScript; copying requires the Clipboard API.
+
+For visual changes, check all three languages at desktop and mobile widths,
+keyboard focus, reduced motion, and disabled JavaScript. Set viewport dimensions
+explicitly when a tiling window manager can resize the browser.
+
+## Deployment
+
+Cloudflare Workers Builds connects `cfgate/cfgate.io` to `cfgate-service-worker` in
+the inherent.design account. A push to `main` builds and deploys independently of
+GitHub Actions, so merge only after PR checks pass. GitHub Actions validates the
+source; it does not publish the website.
+
+The Worker's **Settings → Builds** configuration is:
 
 | Setting           | Value                       |
 | ----------------- | --------------------------- |
 | Production branch | `main`                      |
-| Root directory    | `/` (repository root)       |
+| Root directory    | `/`                         |
 | Build command     | `pnpm run build`            |
 | Deploy command    | `pnpm exec wrangler deploy` |
 
-The GitHub App grants repository access; Cloudflare's generated build token
-authorizes deployment. Local SOPS credentials and GitHub Actions deployment
-secrets are not required. `wrangler.toml` defines the Worker, `dist` assets, and
-custom domain. The deploy command above avoids repeating the build already run
-by the build command; `pnpm run deploy` remains the manual build-and-deploy path.
+The GitHub App grants repository access, and Cloudflare's build token authorizes
+deployment. This connection does not use local SOPS credentials or GitHub Actions
+deployment secrets. `wrangler.toml` defines the Worker, static assets, and domain.
+`pnpm deploy` is the manual build-and-deploy path; do not use it as the deploy
+command after Workers Builds has already run the build.
 
 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)
-selects Node from `.node-version`; GitHub Actions uses the same file. pnpm's
-[version management](https://pnpm.io/settings/cli#pmonfail) selects the
-`packageManager` pin in `package.json`. Tool versions are maintained in Git.
-When upgrading, update these pins and the lockfile as appropriate, keeping Node
-within `engines.node`. Verify the selected versions and deployed commit in
-Cloudflare's build history.
+selects Node from `.node-version`; CI uses the same file. pnpm selects the
+`packageManager` version in `package.json`. Keep these pins, `engines.node`, and
+the lockfile consistent. Verify tool versions and the deployed commit in the
+Cloudflare build history after an upgrade.
 
-Use `pnpm tail` (or its `pnpm tail:prod` alias) for production logs. Production
-uses the root Wrangler configuration; there is no named `production` environment.
+`pnpm tail` streams production logs when local Cloudflare authentication is
+available. `pnpm tail:prod` is an alias; there is no named `production` environment.
+To diagnose project refresh, inspect both `/api/project` and the page: successful
+HTML delivery does not establish that the API refreshed its data.
 
-## Project information
+## Dependency and security maintenance
 
-The homepage example and the English `/releases/` and `/project/` pages complement
-the existing GitHub documentation. They do not maintain a second installation
-guide. Other homepage languages label links to these English pages explicitly.
+Renovate proposes updates on Mondays; merges are manual. The current compatibility
+constraints keep Vitest and its runner/snapshot packages on 4.1, TypeScript below
+7, and Node/runtime types on 24.x. Recheck the Cloudflare test plugin, Astro checker,
+and typescript-eslint before relaxing those constraints. Other major upgrades can
+be proposed. Renovate's GitHub App must have access to the repository.
 
-`src/data/project.json` is a dated, verified fallback snapshot. Static pages render
-it without JavaScript. `GET /api/project` refreshes GitHub releases, reads the
-published chart tag's `Chart.yaml` for its operator pairing, and retrieves the
-operator's latest main-branch CI run. Requests share a six-second deadline; the
-Worker caches the result for 30 minutes per Cloudflare location. Concurrent cache
-misses share one in-progress refresh within each Worker instance, including the
-cache write; separate instances can still refresh independently. The shared value
-is serialized JSON, so each request creates its own Worker response stream. Release and CI
-failures fall back independently, preserving the snapshot's original timestamps.
-The cache is an optimization, not persistent storage. Unauthenticated GitHub rate
-limits can result in fallback data. No provider credentials are needed.
+pnpm 12 uses `allowBuilds` in `pnpm-workspace.yaml` to permit the required native
+build tools. Keep release-age exceptions scoped to reviewed versions.
 
-The browser uses text nodes to update these fields; it never renders provider
-Markdown or HTML. Codecov's main-branch badge and report are separate from the
-GitHub CI result. Artifact Hub links provide package discovery. These signals are
-not deployment health checks or blanket release certifications.
-
-When refreshing the bundled snapshot, verify published tags and dates against the
-two repositories' release APIs, read `appVersion` from the matching chart tag, and
-record the CI run URL, full SHA, update time, and retrieval time. Keep `source` set
-to `snapshot`; runtime refreshes identify successfully fetched data as `github`.
-Do not advance timestamps when retaining old data.
-
-## Dependency maintenance and security
-
-`renovate.json` follows the project's Monday update schedule with manual merges.
-Vitest stays below 5, TypeScript below 7, and Node/runtime types on 24.x until the
-compatibility constraints above are reevaluated. Other major upgrades can be
-proposed for review. Renovate requires its GitHub App to have repository access.
-
-The Security Scan workflow runs Trivy on PRs, main pushes, and weekly schedules.
-It scans the source and lockfile, including development dependencies, for HIGH
-and CRITICAL vulnerabilities and secrets. Build/cache directories are excluded.
-Findings fail the job; SARIF is uploaded for trusted repository runs. Fork PRs
-still scan but skip the upload. The action is pinned by commit, and Renovate tracks
-the Trivy binary version. Run the equivalent check locally with Trivy 0.74.0:
+The Security Scan workflow runs on PRs, main pushes, and weekly schedules. Trivy
+checks source and lockfiles, including development dependencies, for HIGH and
+CRITICAL vulnerabilities and secrets. Findings fail the job. Trusted runs upload
+SARIF; fork PRs scan without uploading it. The action is pinned by commit, and
+Renovate tracks the Trivy version. The equivalent local command is:
 
 ```sh
 trivy fs --config trivy.yaml --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 1 .
 ```
+
+## License
+
+[Apache-2.0](LICENSE).

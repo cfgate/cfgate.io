@@ -18,5 +18,5 @@ export const requestIdMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   await next()
 
   // Echo request ID in response
-  c.res.headers.set('X-Request-Id', requestId)
+  c.header('X-Request-Id', requestId)
 })

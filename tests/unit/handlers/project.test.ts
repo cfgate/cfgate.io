@@ -1,14 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Hono } from 'hono'
-import { projectHandler } from '../../../src/handlers/project'
-import { loggerMiddleware } from '../../../src/middleware/logger'
+import app from '../../../src/index'
 import { projectSnapshot } from '../../../src/lib/project'
-import type { AppEnv } from '../../../src/types'
-
-const app = new Hono<AppEnv>()
-app.use('*', loggerMiddleware)
-app.get('/api/project', projectHandler)
 const key = 'https://cfgate.io/api/project'
 beforeEach(async () => {
   await (await caches.open('project-v1')).delete(key)
@@ -53,12 +46,20 @@ describe('project endpoint cache', () => {
     const ctx = createExecutionContext()
     const first = await app.request(`${key}?first=1`, {}, {}, ctx)
     expect(first.status).toBe(200)
-    expect(first.headers.get('Cache-Control')).toBe('public, max-age=1800')
+    expect(first.headers.get('Cache-Control')).toBe('no-cache')
+    expect(first.headers.get('X-Request-Id')).toBeTruthy()
     expect(await first.json()).toEqual(projectSnapshot)
     await waitOnExecutionContext(ctx)
     expect(fetcher).toHaveBeenCalledTimes(3)
     const next = await app.request(`${key}?second=2`, {}, {}, createExecutionContext())
+    expect(next.status).toBe(200)
+    expect(next.headers.get('Cache-Control')).toBe('no-cache')
+    expect(next.headers.get('X-Request-Id')).toBeTruthy()
+    expect(next.headers.get('X-Request-Id')).not.toBe(first.headers.get('X-Request-Id'))
     expect(await next.json()).toEqual(projectSnapshot)
+    const stored = await (await caches.open('project-v1')).match(key)
+    expect(stored?.headers.get('Cache-Control')).toBe('public, max-age=1800')
+    expect(stored?.headers.has('X-Request-Id')).toBe(false)
     expect(fetcher).toHaveBeenCalledTimes(3)
   })
 })

@@ -35,5 +35,22 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   }
   c.var.logCtx.handler = 'error'
 
+  // Hono preserves existing response headers when replacing a response.
+  // A failed cached response must not retain its freshness or entity metadata.
+  for (const name of [
+    'Age',
+    'CF-Cache-Status',
+    'ETag',
+    'Last-Modified',
+    'Expires',
+    'Content-Length',
+    'Content-Encoding',
+    'Content-Range',
+    'Accept-Ranges',
+    'CDN-Cache-Control',
+    'Cloudflare-CDN-Cache-Control',
+  ])
+    c.header(name, undefined)
+  c.header('Cache-Control', 'no-store')
   return c.text('Service Unavailable', 503)
 }
