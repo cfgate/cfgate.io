@@ -4,202 +4,92 @@
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/cfgate/cfgate.io/ci.yml?branch=main&style=flat)](https://github.com/cfgate/cfgate.io/actions/workflows/ci.yml) [![Security Scan](https://img.shields.io/github/actions/workflow/status/cfgate/cfgate.io/security-scan.yml?branch=main&style=flat&label=security%20scan)](https://github.com/cfgate/cfgate.io/actions/workflows/security-scan.yml)
 
-This repository serves the [cfgate website](https://cfgate.io), project information,
-Go vanity imports, and Kubernetes release manifests through a Cloudflare Worker.
-Operator installation and configuration belong in the
-[cfgate documentation](https://github.com/cfgate/cfgate/tree/main/docs).
+cfgate.io serves the project website, released operator documentation, project information, Go vanity imports and Kubernetes release manifests through one Cloudflare Worker.
+
+[Website](https://cfgate.io) · [Released documentation](https://cfgate.io/docs/) · [Architecture](docs/architecture.md) · [Deployment and recovery](docs/operations.md)
 
 ## Local development
 
-Use `.node-version` for Node.js and the `packageManager` pin in `package.json` for
-pnpm. Install dependencies and start the page preview:
+Use `.node-version` and the `packageManager` pin in `package.json`:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm dev
-```
-
-The Astro preview serves pages. To test the Worker routes and built pages together:
-
-```sh
 pnpm build
-pnpm exec wrangler dev --local
+pnpm exec wrangler dev --local --var ENVIRONMENT:development
 ```
 
-Neither preview deploys to Cloudflare. Project information uses public GitHub
-endpoints; it does not require a provider token.
+This builds the marketing pages and one released documentation edition, then serves the complete Worker locally. Sources come from the commits in `docs/bootstrap.json`; a local build never publishes or claims production work. Set a read-only `GITHUB_TOKEN` if unauthenticated GitHub limits interrupt source retrieval.
+
+For page-only development, use `pnpm dev` for the marketing site or `pnpm docs:dev` for Starlight. A complete custom build plan can be supplied with `pnpm build --plan /path/to/plan.json`; its renderer commit and policy digest must match the checkout.
 
 ## Validation
-
-Run the same checks used for pull requests, then validate the Worker bundle:
 
 ```sh
 pnpm lint
 pnpm typecheck
 pnpm build
 pnpm test
-pnpm exec wrangler deploy --dry-run
+pnpm exec wrangler versions upload --dry-run
 ```
 
-Tests use the local Workers runtime through `@cloudflare/vitest-plugin`. Build the
-pages before running the route suite. Release-proxy smoke tests contact GitHub and
-accept upstream errors; they test route registration, not artifact availability.
-The project-cache regressions use the application middleware, including request
-IDs, and check cache misses, cache hits, concurrent requests, and dated fallbacks.
+The build validates pinned schemas, complete example resources, internal documentation links, assembled routes and asset references. Partial YAML snippets are preserved as authored; schema checks are not Kubernetes admission, CEL execution or live operator tests.
+
+Worker tests run in the local Cloudflare runtime. Node tests cover source selection, imports, historical fixtures, publication races and interruption recovery. Build before running route tests. Release-proxy smoke tests contact GitHub and accept upstream errors; they establish route registration rather than artifact availability.
 
 ## Application structure
 
-| Location                | Responsibility                                           |
-| ----------------------- | -------------------------------------------------------- |
-| `src/pages/`            | Static Astro pages                                       |
-| `src/components/`       | Shared page structure, icons, and workflow illustrations |
-| `src/content/`          | English, Chinese, and Hindi copy                         |
-| `src/styles/global.css` | Semantic color, typography, and motion styles            |
-| `src/scripts/`          | Browser enhancements and project-data refresh            |
-| `src/index.ts`          | Worker routes and middleware                             |
-| `src/handlers/`         | Project API, asset serving, redirects, and release proxy |
-| `src/lib/project.ts`    | GitHub data fetching and validation                      |
-| `src/data/project.json` | Dated fallback project information                       |
+| Location                                     | Responsibility                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------ |
+| `src/pages`, `src/components`, `src/content` | Marketing pages, project views and localized copy                  |
+| `src/styles/tokens.css`                      | Shared colors, type, spacing, sizing and interaction roles         |
+| `src/styles/global.css`                      | Homepage and project-page compositions                             |
+| `src/index.ts`, `src/handlers`               | Worker routing, APIs, assets and proxies                           |
+| `src/docs`                                   | Validated source contracts, release policy and GitHub reads        |
+| `src/runtime`                                | Durable coordination and guarded Cloudflare publication            |
+| `scripts/docs`                               | Pinned-source preparation, reference generation and build commands |
+| `docs/astro.config.ts`, `docs/integration`   | Isolated Starlight renderer and cfgate integration                 |
+| `docs/bootstrap.json`                        | Explicit local/initial source pins                                 |
+| `src/data/project.json`                      | Dated project-data fallback                                        |
 
-Astro renders the pages; Tailwind CSS supplies styling. The Worker serves the
-built `dist` directory and these additional routes:
+The marketing homepage stays at `/`. Documentation lives at `/docs/`; no `/docs/next/` or historical edition is published initially. Source links identify the actual release commit. Generated references identify their schema or chart source.
 
-| Route                                                  | Behavior                                                                                          |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `/api/project`                                         | Release information, chart/operator pairing, and operator CI status                               |
-| `/install.yaml`, `/crds.yaml`, `/crds/*`               | Proxy the corresponding GitHub `releases/latest` asset; upstream fetch cache lifetime is one hour |
-| `/?go-get=1`, `/cfgate?go-get=1`, `/cfgate/*?go-get=1` | Go import metadata for `cfgate.io/cfgate`                                                         |
-| `/cfgate`, `/cfgate/*`                                 | Browser redirects to pkg.go.dev                                                                   |
+## Refresh and publication
 
-For a specific operator version, use that GitHub release's download links. The
-release proxy does not select a version from the website's project-data response.
+The Durable Object owns project observations and build coordination. Pages initially render bundled fallback data, then request `/api/project` once per visit. The endpoint returns stored information immediately and signals a background check when stale. Release and CI failures preserve their last successful data separately.
 
-## Project-data refresh
+Access checks use a 30-minute threshold. An hourly schedule and signed GitHub release webhooks provide independent triggers. Changed normalized inputs request a Cloudflare Workers Build; unchanged observations do not. A successful compilation is uploaded as a candidate and published only if its release, renderer, generation and lease remain eligible.
 
-Pages initially render the bundled snapshot. JavaScript requests `/api/project`
-once per page load, with an eight-second timeout; it does not poll while the page
-stays open. If the request fails, the displayed content remains unchanged.
+The served documentation version comes from the deployed manifest, never from the newest observed release. Failed or superseded builds leave the previous edition online. See [operations](docs/operations.md) for the required one-time migration, secrets, build commands and failure recovery. Pull requests and GitHub Actions do not publish production.
 
-On a Worker cache miss, the API fetches the operator and chart release lists,
-reads `appVersion` from the published chart's `Chart.yaml`, and reads the latest
-operator CI run on `main`. Those requests share a six-second deadline. Each list
-contains up to three published releases, including prereleases. Release data and
-CI data fall back independently if fetching or validation fails. Fallback data
-keeps its original timestamp rather than presenting an old value as newly checked.
+When the coordinator binding is absent, previews retain the legacy project-data cache and dated snapshot fallback. The browser revalidates the API on each visit; its per-location Worker cache lasts 30 minutes. This fallback cache is not publication authority.
 
-The Worker stores the resulting JSON for **30 minutes per Cloudflare location**,
-including responses containing fallback data. The next request after expiry
-refreshes it; there is no timer or release webhook. Query strings share the same
-cache key. Concurrent misses share one refresh within a Worker instance, but
-separate instances or locations may fetch independently. This cache is temporary
-and can be evicted before its lifetime expires.
+## Other routes
 
-Browser responses use `Cache-Control: no-cache`, so subsequent page loads
-revalidate with the Worker instead of adding a browser freshness period. The
-stored Worker response has its own 30-minute cache directive. Request IDs are
-added to a writable response; they are not stored in the project cache. Unhandled
-errors return 503 with `no-store` and without stale cache or entity headers.
+| Route                                                  | Behavior                                                               |
+| ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `/api/project`                                         | Observed releases, chart pairing, CI and served-documentation identity |
+| `/docs/manifest.json`                                  | Static source and renderer provenance for this deployment              |
+| `/api/hooks/github`                                    | Signed, bounded release/workflow notifications                         |
+| `/internal/docs/*`                                     | Authenticated build and administrative operations                      |
+| `/install.yaml`, `/crds.yaml`, `/crds/*`               | GitHub `releases/latest` asset proxy with a one-hour upstream cache    |
+| `/?go-get=1`, `/cfgate?go-get=1`, `/cfgate/*?go-get=1` | Go import metadata                                                     |
+| `/cfgate`, `/cfgate/*`                                 | Browser redirects to pkg.go.dev                                        |
 
-Cloudflare zone settings are separate from this repository. The observed zone
-Browser Cache TTL is four hours; it previously lengthened the browser-facing
-`max-age`. After deploying cache changes, verify the live headers rather than
-assuming the repository alone controls every cache layer. Keep API errors
-uncacheable and avoid a zone rule that overrides the API's revalidation policy.
-
-Successful live sections report `source: github`; bundled sections report
-`source: snapshot`. The page uses text nodes to display these values. Codecov
-badges and Artifact Hub links are separate signals, not deployment health checks.
-
-To update the snapshot, verify release tags, publication dates, the chart's
-operator pairing, and the CI run's SHA, URL, and time. Save the retrieval time and
-keep `source: snapshot`. Do not change timestamps for data that was not rechecked.
+The release proxy remains independent of documentation selection. Use version-specific GitHub download links when installation must match a particular edition.
 
 ## Design and writing
 
-Use semantic styles and shared components rather than page-specific copies.
-Describe what users configure and what cfgate manages. Access protection is
-opt-in; cfgate reconciles Cloudflare configuration and connector workloads, not
-application Deployments. Keep installation instructions in the operator docs so
-there is one maintained source for them.
+Reuse semantic roles for color, type, spacing, sizing, borders and motion. Derive repeated values from shared bases where that preserves a clear relationship. Keep homepage composition rules separate from documentation styles; retain Starlight's reading layout, keyboard navigation, search and mobile controls.
 
-Workflow captions and headings remain at least 12px across breakpoints. Anime.js
-runs the introduction; CSS supplies card drift and hover or viewport motion.
-Motion pauses offscreen and in hidden tabs, respects reduced-motion preferences,
-and resumes after back/forward navigation. Gloss and highlights remain static.
-Navigation and content work without JavaScript; copying requires the Clipboard API.
+Describe what users configure and what cfgate manages. Keep product guidance in the product repository and website deployment instructions here. Imported release prose is not silently replaced with newer `main` content. Configuration snippets and operational warnings retain their source identity.
 
-For visual changes, check all three languages at desktop and mobile widths,
-keyboard focus, reduced motion, and disabled JavaScript. Set viewport dimensions
-explicitly when a tiling window manager can resize the browser.
+Homepage motion pauses offscreen and in hidden tabs and respects reduced-motion preferences. Documentation navigation and content work without JavaScript; search and clipboard controls require it.
 
-## Deployment
+## Security and dependencies
 
-Cloudflare Workers Builds connects `cfgate/cfgate.io` to `cfgate-service-worker` in
-the inherent.design account. A push to `main` builds and deploys independently of
-GitHub Actions, so merge only after PR checks pass. GitHub Actions validates the
-source; it does not publish the website.
+Renovate proposes dependency updates. CI runs lint, type checks, builds and tests. Trivy checks vulnerabilities and secrets. The narrowly scoped `http-cache-semantics` advisory exception in `.trivyignore.yaml` documents its build-only applicability and expiry; re-evaluate it when that dependency or Astro's image-cache behavior changes.
 
-The Worker's **Settings → Builds** configuration is:
-
-| Setting           | Value                       |
-| ----------------- | --------------------------- |
-| Production branch | `main`                      |
-| Root directory    | `/`                         |
-| Build command     | `pnpm run build`            |
-| Deploy command    | `pnpm exec wrangler deploy` |
-
-Pull-request builds use `pnpm exec wrangler preview`. The empty `[previews]`
-block opts into that workflow; assets and compatibility settings stay at the top
-level. Production continues to use `wrangler deploy`. Configure future data bindings explicitly for previews, and review any shared
-secrets in the dashboard's Previews Base configuration. See [preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
-
-The GitHub App grants repository access, and Cloudflare's build token authorizes
-deployment. This connection does not use local SOPS credentials or GitHub Actions
-deployment secrets. `wrangler.toml` defines the Worker, static assets, and domain.
-`pnpm deploy` is the manual build-and-deploy path; do not use it as the deploy
-command after Workers Builds has already run the build.
-
-[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)
-selects Node from `.node-version`; CI uses the same file. pnpm selects the
-`packageManager` version in `package.json`. Keep these pins, `engines.node`, and
-the lockfile consistent. Verify tool versions and the deployed commit in the
-Cloudflare build history after an upgrade.
-
-`pnpm tail` streams production logs when local Cloudflare authentication is
-available. `pnpm tail:prod` is an alias; there is no named `production` environment.
-To diagnose project refresh, inspect both `/api/project` and the page: successful
-HTML delivery does not establish that the API refreshed its data.
-
-## Dependency and security maintenance
-
-Renovate proposes updates on Mondays; merges are manual. The current compatibility
-constraints keep Vitest and its runner/snapshot packages on 4.1, TypeScript below
-7, and Node/runtime types on 24.x. Recheck the Cloudflare test plugin, Astro checker,
-and typescript-eslint before relaxing those constraints. Other major upgrades can
-be proposed. Renovate's GitHub App must have access to the repository.
-
-pnpm 12 uses `allowBuilds` in `pnpm-workspace.yaml` to permit the required native
-build tools. Keep release-age exceptions scoped to reviewed versions.
-
-The Security Scan workflow runs on PRs, main pushes, and weekly schedules. Trivy
-checks source and lockfiles, including development dependencies, for HIGH and
-CRITICAL vulnerabilities and secrets. Findings fail the job. Trusted runs upload
-SARIF; fork PRs scan without uploading it. The action is pinned by commit, and
-Renovate tracks the Trivy version. The equivalent local command is:
-
-```sh
-trivy fs --config trivy.yaml --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 1 .
-```
-
-The time-limited exception in `.trivyignore.yaml` covers only
-`http-cache-semantics@4.2.0` in the lockfile (CVE-2026-93748). Astro uses it to
-calculate build-time image freshness; it does not pass visitor headers to the
-reported stale-response path. The deployed Hono Worker does not include the
-package. Reassess this exception before adding SSR or runtime image handling,
-when updating Astro, or when it expires. The
-[upstream discussion](https://github.com/kornelski/http-cache-semantics/issues/56)
-is disputed; the exception is based on this project's usage, not a claim that the
-package is fixed. Other findings still fail the scan.
+Keep read-only source credentials, webhook secrets, build authentication and deployment authority separate. Preview builds receive no production publication credentials. Review Cloudflare zone cache rules separately from repository headers when investigating stale responses.
 
 ## License
 

@@ -5,10 +5,25 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default defineConfig([
-  { ignores: ['src/worker-configuration.d.ts', 'dist/**', '.astro/**', '.wrangler/**'] },
+  {
+    ignores: [
+      'src/worker-configuration.d.ts',
+      'dist/**',
+      '.astro/**',
+      '.wrangler/**',
+      '.build/**',
+      '.generated/**',
+      'docs/src/content/docs/**',
+      'docs/.astro/**',
+    ],
+  },
   {
     rules: {
-      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
     },
     languageOptions: {
       globals: {
@@ -27,6 +42,7 @@ export default defineConfig([
     },
     plugins: {
       js: js,
+      '@typescript-eslint': tseslint.plugin,
       tseslint: tseslint,
     },
     extends: [js.configs.recommended, tseslint.configs.stylisticTypeChecked],
