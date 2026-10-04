@@ -27,7 +27,8 @@ export function normalizeMarkdown(
   source: SourcePin,
   target: DocsTarget,
   catalog: Map<string, string>,
-  assets: Map<string, string>
+  assets: Map<string, string>,
+  sourceInventory = new Set<string>()
 ): { title: string; markdown: string } {
   const tree = processor.parse(markdown) as Root
   // Live repository badges describe current project state, not this pinned edition.
@@ -90,7 +91,9 @@ export function normalizeMarkdown(
       const asset = assets.get(resolved)
       if (!asset) throw new Error(`Missing local image ${resolved}`)
       node.url = asset
-    } else
+    } else if (/\.md$/i.test(resolved) && !sourceInventory.has(resolved))
+      throw new Error(`Missing documentation page in ${path}: ${resolved}`)
+    else
       node.url = `https://github.com/${source.repository}/blob/${source.commit}/${resolved}${suffix}`
   })
   return { title, markdown: processor.stringify(tree) }

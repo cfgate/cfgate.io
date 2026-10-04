@@ -11,13 +11,17 @@ function setup(initialized = true) {
   const data = new Map<string, unknown>([['state', { ...initialState(), initialized }]])
   let now = Date.now()
   let active: string | undefined
+  let alarm: number | null = null
   const target = targetSchema.parse(bootstrap)
   const storage: CoordinatorStorage = {
     get: async <T>(key: string) => structuredClone(data.get(key)) as T | undefined,
     put: vi.fn(async (key, value) => {
       data.set(key, structuredClone(value))
     }),
-    setAlarm: vi.fn(async () => {}),
+    getAlarm: async () => alarm,
+    setAlarm: vi.fn(async (time) => {
+      alarm = time
+    }),
     transaction: async (operation) => operation(storage),
   }
   const github = new Github()
@@ -246,7 +250,9 @@ describe('notification latency', () => {
     await vi.waitFor(() => expect(s.github.target).toHaveBeenCalled())
     await s.engine.signal(id)
     expect(await s.storage.get('signals')).toMatchObject({ receipts: { [id]: expect.any(Number) } })
+    const wakeup = await s.storage.getAlarm()
     release()
     await checking
+    expect(await s.storage.getAlarm()).toBe(wakeup)
   })
 })

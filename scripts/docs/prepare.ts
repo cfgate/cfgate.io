@@ -27,11 +27,17 @@ const treeSchema = z.object({
     z.object({ path: z.string(), mode: z.string(), type: z.string(), size: z.number().optional() })
   ),
 })
-export async function sourceFiles(github: Github, source: SourcePin): Promise<Map<string, string>> {
+export async function sourceFiles(
+  github: Github,
+  source: SourcePin,
+  inventory = new Set<string>()
+): Promise<Map<string, string>> {
   const tree = treeSchema.parse(
     await github.get(`/repos/${source.repository}/git/trees/${source.commit}?recursive=1`)
   )
   if (tree.truncated) throw new Error('Incomplete source tree')
+  for (const entry of tree.tree)
+    if (entry.type === 'blob' && entry.mode === '100644') inventory.add(entry.path)
   const entries = tree.tree.filter((e) =>
     source.repository === 'cfgate/helm-chart'
       ? ['Chart.yaml', 'values.yaml', 'README.md'].includes(e.path)
@@ -78,7 +84,8 @@ export async function prepare(
     await readFile(resolve(root, 'public/favicon.svg'), 'utf8')
   )
   for (const target of plan.targets) {
-    const files = await sourceFiles(github, target.documentationSource)
+    const inventory = new Set<string>()
+    const files = await sourceFiles(github, target.documentationSource, inventory)
     const catalog = new Map<string, string>()
     for (const path of files.keys())
       if (path.endsWith('.md')) {
@@ -137,7 +144,8 @@ export async function prepare(
         target.documentationSource,
         target,
         catalog,
-        assets
+        assets,
+        inventory
       )
       await add(docId, normalized.title, normalized.markdown, target.documentationSource, path)
     }
@@ -185,7 +193,8 @@ export async function prepare(
           )
       }
     if (target.chartSource) {
-      const chart = await sourceFiles(github, target.chartSource)
+      const chartInventory = new Set<string>()
+      const chart = await sourceFiles(github, target.chartSource, chartInventory)
       const { parse } = await import('yaml')
       const metadata = parse(chart.get('Chart.yaml')!)
       const { valid } = await import('semver')
@@ -208,7 +217,8 @@ export async function prepare(
         target.chartSource,
         target,
         new Map(),
-        new Map()
+        new Map(),
+        chartInventory
       )
       await add(
         'helm/installation',

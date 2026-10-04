@@ -46,18 +46,22 @@ export class Coordinator {
   async state(): Promise<CoordinatorState> {
     return (await this.storage.get<CoordinatorState>('state')) ?? initialState()
   }
+  private async schedule(time: number) {
+    await this.storage.transaction(async (txn) => {
+      const current = await txn.getAlarm()
+      if (current === null || current > time) await txn.setAlarm(time)
+    })
+  }
   private async save(state: CoordinatorState) {
     state.jobs = state.jobs.slice(-8)
     // Write the alarm before state: a crash after either write must leave a wakeup.
-    await this.storage.setAlarm(
-      this.now() + (state.publishing ? 60000 : docsPolicy.retryIntervalMs)
-    )
+    await this.schedule(this.now() + (state.publishing ? 60000 : docsPolicy.retryIntervalMs))
     await this.storage.put('state', state)
   }
   async signal(delivery?: string, staleOnly = false): Promise<void> {
     if (staleOnly && (await this.state()).nextCheckAt > this.now()) return
     // A webhook receipt must not wait for a build claim or provider call holding the publication lock.
-    await this.storage.setAlarm(this.now() + 1000)
+    await this.schedule(this.now() + 1000)
     await this.storage.transaction(async (txn) => {
       const signals = (await txn.get<CoordinatorSignals>('signals')) ?? { receipts: {} }
       if (delivery && signals.receipts[delivery]) return

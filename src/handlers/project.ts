@@ -12,22 +12,29 @@ const responseHeaders = {
 
 export async function projectHandler(c: Context<AppEnv>): Promise<Response> {
   c.var.logCtx.handler = 'project'
-  const stub = coordinator(c.env)
-  if (stub) {
-    signalAccess(c)
-    const response = await stub.fetch('https://coordinator/project')
-    if (!response.ok) throw new Error('Project coordinator unavailable')
-    const data = (await response.json()) as { documentation: Record<string, unknown> }
-    data.documentation = {
-      ...data.documentation,
-      ...((await servedDocumentation(c.env)) as object),
-    }
-    return new Response(JSON.stringify(data), { headers: responseHeaders })
-  }
   const respond = async (body: string) => {
-    const served = await servedDocumentation(c.env)
-    if (served) body = JSON.stringify({ ...JSON.parse(body), documentation: served })
+    // Source identity is optional during an asset outage, never inferred from observed releases.
+    const served = await servedDocumentation(c.env).catch(() => undefined)
+    if (served) {
+      const data = JSON.parse(body)
+      body = JSON.stringify({ ...data, documentation: { ...data.documentation, ...served } })
+    }
     return new Response(body, { headers: responseHeaders })
+  }
+  try {
+    const stub = coordinator(c.env)
+    if (stub) {
+      signalAccess(c)
+      const response = await stub.fetch('https://coordinator/project')
+      if (!response.ok) throw new Error('Project coordinator unavailable')
+      const data = await response.json()
+      if (!data || typeof data !== 'object' || Array.isArray(data))
+        throw new Error('Invalid project data')
+      return respond(JSON.stringify(data))
+    }
+  } catch {
+    // Coordination failures must not remove the existing display-data fallback.
+    console.warn('Project coordinator unavailable; serving fallback project information')
   }
   // A fixed key prevents query strings from multiplying upstream requests.
   const key = new Request('https://cfgate.io/api/project')

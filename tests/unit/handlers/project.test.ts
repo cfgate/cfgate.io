@@ -40,6 +40,45 @@ describe('project endpoint cache', () => {
     expect(fetcher).toHaveBeenCalledTimes(6)
   })
 
+  it.each(['unavailable', 'network', 'malformed'])(
+    'keeps project data available when coordination is %s',
+    async (mode) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 429 }))
+      )
+      const env = {
+        PROJECT_COORDINATOR: {
+          idFromName: () => 'project',
+          get: () => ({
+            fetch: async () => {
+              if (mode === 'network') throw new Error('Disconnected')
+              return mode === 'malformed'
+                ? new Response('not JSON')
+                : new Response(null, { status: 503 })
+            },
+          }),
+        } as unknown as DurableObjectNamespace,
+      }
+      const response = await app.request(key, {}, env, createExecutionContext())
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual(projectSnapshot)
+    }
+  )
+  it('keeps valid coordinator observations when the served manifest is malformed', async () => {
+    const observations = { ...projectSnapshot, documentation: { observedLatest: 'v2.0.0' } }
+    const env = {
+      PROJECT_COORDINATOR: {
+        idFromName: () => 'project',
+        get: () => ({ fetch: async () => Response.json(observations) }),
+      } as unknown as DurableObjectNamespace,
+      ASSETS: { fetch: async () => Response.json({ invalid: true }) } as unknown as Fetcher,
+    }
+    const response = await app.request(key, {}, env, createExecutionContext())
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(observations)
+  })
+
   it('reads preview edition identity from assets even when metadata is cached', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 429 }))
     vi.stubGlobal('fetch', fetcher)
