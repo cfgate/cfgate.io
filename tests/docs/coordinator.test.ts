@@ -116,6 +116,17 @@ describe('durable publication lifecycle', () => {
     ).rejects.toThrow('superseded')
     expect(s.provider.deploy).not.toHaveBeenCalled()
   })
+  it('resumes build requests when unavailable release sources recover', async () => {
+    const s = setup()
+    vi.mocked(s.github.target).mockRejectedValueOnce(new Error('Chart release not ready'))
+    await s.engine.reconcile()
+    expect((await s.engine.state()).phase).toBe('waiting-for-sources')
+    expect(s.provider.requestBuild).not.toHaveBeenCalled()
+    s.advance(docsPolicy.retryIntervalMs)
+    await s.engine.reconcile()
+    expect((await s.engine.state()).phase).toBe('build-requested')
+    expect(s.provider.requestBuild).toHaveBeenCalledTimes(1)
+  })
   it('detects tag movement instead of relabeling source content', async () => {
     const s = setup()
     await s.engine.reconcile()
