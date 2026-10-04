@@ -186,6 +186,16 @@ Renovate tracks the Trivy version. The equivalent local command is:
 trivy fs --config trivy.yaml --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 1 .
 ```
 
+The time-limited exception in `.trivyignore.yaml` covers only
+`http-cache-semantics@4.2.0` in the lockfile (CVE-2026-93748). Astro uses it to
+calculate build-time image freshness; it does not pass visitor headers to the
+reported stale-response path. The deployed Hono Worker does not include the
+package. Reassess this exception before adding SSR or runtime image handling,
+when updating Astro, or when it expires. The
+[upstream discussion](https://github.com/kornelski/http-cache-semantics/issues/56)
+is disputed; the exception is based on this project's usage, not a claim that the
+package is fixed. Other findings still fail the scan.
+
 ## License
 
 [Apache-2.0](LICENSE).

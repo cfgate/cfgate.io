@@ -1,0 +1,16 @@
+vulnerabilities:
+  - id: CVE-2026-93748
+    paths:
+      - pnpm-lock.yaml
+    purls:
+      - pkg:npm/http-cache-semantics@4.2.0
+    expired_at: 2026-11-03
+    statement: >-
+      Reviewed 2026-10-04 for Astro 7.3.5 static output. The only importer is
+      astro/dist/assets/build/remote.js, which computes build-time image TTLs
+      with storable()/timeToLive(); it never calls satisfiesWithoutRevalidation()
+      with a visitor's max-stale header. The deployed Hono Worker bundle does not
+      include this package. Reassess on SSR, image-serving, or dependency changes.
+      Upstream disputes the advisory at
+      https://github.com/kornelski/http-cache-semantics/issues/56;
+      this exception relies on the checked call path, not that dispute.
