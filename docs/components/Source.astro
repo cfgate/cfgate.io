@@ -1,0 +1,14 @@
+---
+const page = Astro.locals.starlightRoute.entry.data.cfgate
+const source = page?.source
+---
+
+{source && (
+  <a
+    class='source-link'
+    href={`https://github.com/${source.repository}/blob/${source.commit}/${source.path}`}
+  >
+    {page.generatedFrom ? 'Generated from released source' : 'View released source'}{' '}
+    <span aria-hidden='true'>↗</span>
+  </a>
+)}

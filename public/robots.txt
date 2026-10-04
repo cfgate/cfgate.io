@@ -2,3 +2,5 @@ User-agent: *
 Allow: /
 
 Sitemap: https://cfgate.io/sitemap.xml
+
+Sitemap: https://cfgate.io/docs/sitemap-index.xml

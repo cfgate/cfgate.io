@@ -1,0 +1,48 @@
+@import '@inherent.design/brand/fonts/vars';
+@import '@inherent.design/brand/fonts/en';
+
+/* Shared semantic roles: components inherit ink and surface as a pair. */
+:root {
+  color-scheme: dark;
+  --surface: #09090b;
+  --surface-raised: #141417;
+  --ink: #f5f4f2;
+  --ink-muted: #a6a5ad;
+  --line: #2b2a30;
+  --accent: #ff7b24;
+  --on-accent: #291205;
+  --focus: #ffae70;
+  --card-ink: #1d1d23;
+  --card-muted: #52515b;
+  --card-line: #c4c3c9;
+  --font-body: var(--brand-font-sans);
+  --font-code: var(--brand-font-mono);
+  --motion-feedback: 140ms;
+  --motion-reveal: 220ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --background: var(--surface);
+  --foreground: var(--ink);
+  --primary: var(--accent);
+  --primary-foreground: var(--on-accent);
+}
+
+:root {
+  --space-unit: 0.25rem;
+  --space-inline: calc(var(--space-unit) * 2);
+  --space-control: calc(var(--space-unit) * 3);
+  --space-content: calc(var(--space-unit) * 6);
+  --space-section: calc(var(--space-content) * 2);
+  --size-text: 1rem;
+  --size-caption: calc(var(--size-text) * 0.875);
+  --size-control: calc(var(--space-unit) * 11);
+  --measure-reading: 48rem;
+  --measure-site: 72.5rem;
+  --gutter-site: calc(var(--space-unit) * 10);
+  --radius-control: calc(var(--space-unit) * 2);
+  --radius-panel: calc(var(--radius-control) * 2);
+  --border-subtle: 1px solid var(--line);
+  --focus-width: 2px;
+  --surface-code: color-mix(in oklab, var(--surface-raised), var(--surface) 35%);
+  --accent-soft: color-mix(in oklab, var(--accent) 18%, var(--surface));
+  --accent-ink: color-mix(in oklab, var(--accent), white 35%);
+}

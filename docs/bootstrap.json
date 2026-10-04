@@ -1,0 +1,23 @@
+{
+  "id": "latest",
+  "channel": "latest",
+  "mount": "",
+  "locale": "en",
+  "operatorVersion": "v0.2.0-alpha.11",
+  "operatorSource": {
+    "repository": "cfgate/cfgate",
+    "ref": "v0.2.0-alpha.11",
+    "commit": "d5bebc42cc27f606ca84aa3d3681071e5f991fcd"
+  },
+  "documentationSource": {
+    "repository": "cfgate/cfgate",
+    "ref": "v0.2.0-alpha.11",
+    "commit": "d5bebc42cc27f606ca84aa3d3681071e5f991fcd"
+  },
+  "chartVersion": "v1.10.0",
+  "chartSource": {
+    "repository": "cfgate/helm-chart",
+    "ref": "v1.10.0",
+    "commit": "89e22712ec928ea462770d61a37bd19e721290e5"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "include": [
+    ".astro/types.d.ts",
+    "src",
+    "components",
+    "integration",
+    "astro.config.ts",
+    "navigation.ts"
+  ],
+  "exclude": ["src/content/docs", "../node_modules", "../.build"]
+}
