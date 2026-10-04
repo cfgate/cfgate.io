@@ -108,7 +108,6 @@ export class Coordinator {
     try {
       const releases = await this.github.releases('cfgate/cfgate')
       state.observedLatest = releases[0]?.tag_name
-      state.lastReleaseCheck = new Date(this.now()).toISOString()
       const [selected, renderer] = await Promise.all([this.github.target(), this.github.renderer()])
       const plan = await makePlan(
         renderer,
@@ -117,6 +116,7 @@ export class Coordinator {
         (state.desired?.generation ?? 0) + 1
       )
       this.pin(state, plan)
+      state.lastReleaseCheck = new Date(this.now()).toISOString()
       const display = (repo: string, entries: typeof releases) =>
         entries.slice(0, 3).map((r) => ({
           version: r.tag_name,

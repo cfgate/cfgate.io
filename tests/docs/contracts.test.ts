@@ -99,6 +99,23 @@ describe('release and plan contracts', () => {
     expect(selected.chart[0].tag_name).toBe('v3.0.0')
     expect(selected.chartAppVersion).toBe('1.0.0')
   })
+  it('finds a matching chart beyond the first thirty released charts', async () => {
+    const github = new Github()
+    const charts = Array.from({ length: 35 }, (_, i) => release(`v1.${35 - i}.0`))
+    vi.spyOn(github, 'releases').mockImplementation(async (repo) =>
+      repo === 'cfgate/cfgate' ? [release('v2.0.0')] : charts
+    )
+    vi.spyOn(github, 'pin').mockImplementation(async (repository, ref) => ({
+      repository,
+      ref,
+      commit: 'a'.repeat(40),
+    }))
+    vi.spyOn(github, 'text').mockImplementation(
+      async (source) =>
+        `version: ${source.ref.slice(1)}\nappVersion: ${source.ref === 'v1.1.0' ? '2.0.0' : '1.0.0'}`
+    )
+    expect((await github.target()).target.chartVersion).toBe('v1.1.0')
+  })
   it('uses conditional reads without advancing to unobserved content', async () => {
     const fetcher = vi
       .fn<typeof fetch>()

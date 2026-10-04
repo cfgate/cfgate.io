@@ -15,7 +15,7 @@ Four identities remain separate:
 
 `src/docs/policy.ts` includes prereleases and excludes drafts and unpublished tags. Selection reads complete release pages, up to ten pages of 100 entries. Reaching that bound fails selection instead of assuming the first page contains the highest version. Annotated tags resolve to their commit. Previously observed release tags cannot change commits silently.
 
-The coordinator waits for a released chart whose `appVersion` matches the operator. A newly observed operator can therefore appear in project information before its documentation is ready. A product `main` push does not select new documentation. A website `main` push changes the renderer and can rebuild the same product release.
+The coordinator examines the bounded release inventory for a chart whose `appVersion` matches the operator, without truncating it to the display list. Its successful source-check timestamp advances only after matching-chart selection and pin verification succeed. A newly observed operator can therefore appear in project information before its documentation is ready. A product `main` push does not select new documentation. A website `main` push changes the renderer and can rebuild the same product release.
 
 The initial policy publishes English `latest` at `/docs/`. It generates no historical or `next` editions. Unknown edition URLs return 404. Contracts and fixtures support selective historical targets, with logical page IDs, separate routes and navigation, and edition search metadata. Production history remains disabled; adding it also requires enabling a version-scoped search interface.
 
