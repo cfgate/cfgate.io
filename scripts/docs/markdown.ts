@@ -30,6 +30,28 @@ export function normalizeMarkdown(
   assets: Map<string, string>
 ): { title: string; markdown: string } {
   const tree = processor.parse(markdown) as Root
+  // Live repository badges describe current project state, not this pinned edition.
+  tree.children = tree.children.filter(
+    (node) =>
+      node.type !== 'paragraph' ||
+      !node.children.every((child) => {
+        if (child.type === 'text') return !child.value.trim()
+        const image =
+          child.type === 'image'
+            ? child
+            : child.type === 'link' &&
+                child.children.length === 1 &&
+                child.children[0].type === 'image'
+              ? child.children[0]
+              : undefined
+        return (
+          !!image &&
+          /^https:\/\/(?:img\.shields\.io\/|codecov\.io\/.*badge\.svg|pkg\.go\.dev\/badge\/)/.test(
+            image.url
+          )
+        )
+      })
+  )
   const heading = tree.children.find((n): n is Heading => n.type === 'heading' && n.depth === 1)
   const title = heading ? toString(heading) : posix.basename(path, '.md')
   if (heading) {

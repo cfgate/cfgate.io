@@ -79,6 +79,26 @@ describe('release and plan contracts', () => {
     )
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
+  it('pairs documentation with a matching chart without relabeling the newest chart', async () => {
+    const github = new Github()
+    vi.spyOn(github, 'releases').mockImplementation(async (repo) =>
+      repo === 'cfgate/cfgate' ? [release('v2.0.0')] : [release('v3.0.0'), release('v2.1.0')]
+    )
+    vi.spyOn(github, 'pin').mockImplementation(async (repository, ref) => ({
+      repository,
+      ref,
+      commit: 'a'.repeat(40),
+    }))
+    vi.spyOn(github, 'text').mockImplementation(async (source) =>
+      source.ref === 'v3.0.0'
+        ? 'version: 3.0.0\nappVersion: 1.0.0'
+        : 'version: 2.1.0\nappVersion: 2.0.0'
+    )
+    const selected = await github.target()
+    expect(selected.target.chartVersion).toBe('v2.1.0')
+    expect(selected.chart[0].tag_name).toBe('v3.0.0')
+    expect(selected.chartAppVersion).toBe('1.0.0')
+  })
   it('uses conditional reads without advancing to unobserved content', async () => {
     const fetcher = vi
       .fn<typeof fetch>()

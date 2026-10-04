@@ -40,6 +40,32 @@ describe('project endpoint cache', () => {
     expect(fetcher).toHaveBeenCalledTimes(6)
   })
 
+  it('reads preview edition identity from assets even when metadata is cached', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 429 }))
+    vi.stubGlobal('fetch', fetcher)
+    let version = 'v1.0.0'
+    const env = {
+      ASSETS: {
+        fetch: async () =>
+          Response.json({
+            buildKey: version,
+            targets: [{ channel: 'latest', operatorVersion: version }],
+          }),
+      } as unknown as Fetcher,
+    }
+    for (const current of ['v1.0.0', 'v1.1.0']) {
+      version = current
+      const response = await app.request(key, {}, env, createExecutionContext())
+      expect(
+        ((await response.json()) as { documentation: { servedVersion: string } }).documentation
+          .servedVersion
+      ).toBe(current)
+    }
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    const cached = await (await caches.open('project-v1')).match(key)
+    expect(await cached?.json()).not.toHaveProperty('documentation')
+  })
+
   it('caches fallback responses and ignores query strings in the cache key', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 429 }))
     vi.stubGlobal('fetch', fetcher)
