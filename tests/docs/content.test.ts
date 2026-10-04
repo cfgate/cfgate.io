@@ -26,6 +26,18 @@ describe('source-aware Markdown', () => {
     expect(result.markdown).toContain('id="example"')
     expect(result.markdown).not.toContain('# Example')
   })
+  it('omits live repository badges without removing article images', () => {
+    const result = normalizeMarkdown(
+      '# Release\n\n[![Latest](https://img.shields.io/github/v/release/cfgate/cfgate)](https://github.com/cfgate/cfgate/releases/latest)\n\n![Diagram](https://example.com/diagram.svg)',
+      'README.md',
+      target.operatorSource,
+      target,
+      new Map(),
+      new Map()
+    )
+    expect(result.markdown).not.toContain('shields.io')
+    expect(result.markdown).toContain('example.com/diagram.svg')
+  })
   it('preserves anchors when the promoted page title is repeated below', async () => {
     const content = normalizeMarkdown(
       '# Example\n\n## Example\n\n## Example',

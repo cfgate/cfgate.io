@@ -45,7 +45,7 @@ flowchart TD
 
 The preparer reads bounded GitHub trees and a selected set of regular files at pinned commits. It rejects traversal, symlinks, truncated trees, oversized files and unassigned Markdown pages. Sources stay in memory during preparation; only temporary generated Markdown and manifests reach the build workspace.
 
-Markdown links and reference definitions are rewritten through a syntax tree. Documentation links use logical page IDs; other repository paths link to the pinned source revision. Code blocks remain verbatim. Imported content is Markdown, never executable MDX. HTML is sanitized, and imported SVGs receive a restrictive response policy. Local image filenames derive from their contents.
+Markdown links and reference definitions are rewritten through a syntax tree. Documentation links use logical page IDs; other repository paths link to the pinned source revision. Code blocks remain verbatim. Badge-only paragraphs for live release, CI and coverage services are omitted: they describe mutable project state and could mislabel an older served edition. Imported content is Markdown, never executable MDX. HTML is sanitized, and imported SVGs receive a restrictive response policy. Local image filenames derive from their contents.
 
 CRD reference pages describe parent-level required fields, nested objects, arrays, maps, defaults, enums, nullability and Kubernetes validation metadata. Generated schemas are cross-checked against the release's combined CRD asset when present. Authored behavioral guides remain intact; generated pages supplement their manual reference tables rather than guessing which prose to remove.
 

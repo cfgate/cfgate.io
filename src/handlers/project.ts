@@ -24,11 +24,16 @@ export async function projectHandler(c: Context<AppEnv>): Promise<Response> {
     }
     return new Response(JSON.stringify(data), { headers: responseHeaders })
   }
+  const respond = async (body: string) => {
+    const served = await servedDocumentation(c.env)
+    if (served) body = JSON.stringify({ ...JSON.parse(body), documentation: served })
+    return new Response(body, { headers: responseHeaders })
+  }
   // A fixed key prevents query strings from multiplying upstream requests.
   const key = new Request('https://cfgate.io/api/project')
   const cache = await caches.open('project-v1')
   const cached = await cache.match(key)
-  if (cached) return new Response(cached.body, { headers: responseHeaders })
+  if (cached) return respond(await cached.text())
   // Coalesce misses within this isolate, including the cache-write window.
   refresh ??= (async () => {
     const data = await loadProjectData()
@@ -48,5 +53,5 @@ export async function projectHandler(c: Context<AppEnv>): Promise<Response> {
     refresh = undefined
   })
   // Worker response streams belong to their request; only plain data can be shared.
-  return new Response(await refresh, { headers: responseHeaders })
+  return respond(await refresh)
 }
