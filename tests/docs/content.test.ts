@@ -108,7 +108,7 @@ describe('source-aware Markdown', () => {
           ['config/crd/bases/tunnels.yaml', schema],
           [
             'examples/basic/resources.yaml',
-            'apiVersion: v1\nkind: Service\n---\napiVersion: cfgate.io/v1alpha1\nkind: CloudflareTunnel',
+            'apiVersion: v1\nkind: Service\n---\napiVersion: external.example.com/v1\nkind: CloudflareRecord\n---\napiVersion: cfgate.io/v1alpha1\nkind: CloudflareTunnel',
           ],
         ])
       )
