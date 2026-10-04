@@ -1,3 +1,4 @@
+ignorefile: .trivyignore.yaml
 scan:
   skip-dirs:
     - node_modules
