@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'docs/**'
+      - 'scripts/**'
       - 'public/**'
       - 'tests/**'
       - 'astro.config.ts'
-      - 'tsconfig.json'
-      - 'vitest.config.ts'
+      - 'tsconfig*.json'
+      - 'vitest*.config.ts'
       - 'eslint.config.ts'
       - 'wrangler.toml'
       - 'pnpm-workspace.yaml'
@@ -21,11 +23,13 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'docs/**'
+      - 'scripts/**'
       - 'public/**'
       - 'tests/**'
       - 'astro.config.ts'
-      - 'tsconfig.json'
-      - 'vitest.config.ts'
+      - 'tsconfig*.json'
+      - 'vitest*.config.ts'
       - 'eslint.config.ts'
       - 'wrangler.toml'
       - 'pnpm-workspace.yaml'
@@ -63,5 +67,7 @@ jobs:
       - run: pnpm typecheck
 
       - run: pnpm build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - run: pnpm test
