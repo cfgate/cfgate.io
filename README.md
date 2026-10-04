@@ -148,6 +148,11 @@ The Worker's **Settings → Builds** configuration is:
 | Build command     | `pnpm run build`            |
 | Deploy command    | `pnpm exec wrangler deploy` |
 
+Pull-request builds use `pnpm exec wrangler preview`. The empty `[previews]`
+block opts into that workflow; assets and compatibility settings stay at the top
+level. Production continues to use `wrangler deploy`. Configure future data bindings explicitly for previews, and review any shared
+secrets in the dashboard's Previews Base configuration. See [preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
+
 The GitHub App grants repository access, and Cloudflare's build token authorizes
 deployment. This connection does not use local SOPS credentials or GitHub Actions
 deployment secrets. `wrangler.toml` defines the Worker, static assets, and domain.
