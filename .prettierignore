@@ -47,5 +47,11 @@ prev/
 # Wrangler
 .wrangler
 
-# Docs
-docs/
+
+.generated/
+.build/
+docs/src/content/docs/
+docs/public/
+docs/.astro/
+
+src/worker-configuration.d.ts

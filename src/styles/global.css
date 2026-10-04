@@ -1,34 +1,9 @@
 @import '@inherent.design/brand/styles/starwind';
 @import '@inherent.design/brand/styles';
-@import '@inherent.design/brand/fonts/vars';
-@import '@inherent.design/brand/fonts/en';
 @import '@inherent.design/brand/fonts/zh';
 @import '@inherent.design/brand/fonts/hi';
 
-/* Shared semantic roles: components inherit ink and surface as a pair. */
-:root {
-  color-scheme: dark;
-  --surface: #09090b;
-  --surface-raised: #141417;
-  --ink: #f5f4f2;
-  --ink-muted: #a6a5ad;
-  --line: #2b2a30;
-  --accent: #ff7b24;
-  --on-accent: #291205;
-  --focus: #ffae70;
-  --card-ink: #1d1d23;
-  --card-muted: #52515b;
-  --card-line: #c4c3c9;
-  --font-body: var(--brand-font-sans);
-  --font-code: var(--brand-font-mono);
-  --motion-feedback: 140ms;
-  --motion-reveal: 220ms;
-  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --background: var(--surface);
-  --foreground: var(--ink);
-  --primary: var(--accent);
-  --primary-foreground: var(--on-accent);
-}
+@import './tokens.css';
 
 *,
 *::before,
@@ -44,7 +19,7 @@ body {
   margin: 0;
   background: var(--surface);
   color: var(--ink);
-  font: 400 1rem/1.65 var(--font-body);
+  font: 400 var(--size-text)/1.65 var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 body::before {
@@ -80,7 +55,7 @@ button {
 }
 a:focus-visible,
 button:focus-visible {
-  outline: 2px solid var(--focus);
+  outline: var(--focus-width) solid var(--focus);
   outline-offset: 5px;
   border-radius: 4px;
 }
@@ -89,7 +64,7 @@ button:focus-visible {
   color: var(--on-accent);
 }
 .container {
-  width: min(1160px, calc(100% - 80px));
+  width: min(var(--measure-site), calc(100% - var(--gutter-site) * 2));
   margin-inline: auto;
   position: relative;
 }
@@ -236,7 +211,7 @@ button:focus-visible {
 .hero-actions {
   display: flex;
   justify-content: center;
-  gap: 16px;
+  gap: calc(var(--space-unit) * 4);
   margin-top: 29px;
 }
 .button {
@@ -426,7 +401,7 @@ button:focus-visible {
   position: absolute;
   width: 232px;
   border: 1px solid #fff;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: linear-gradient(145deg, #fffffff5, #e8e7ed);
   box-shadow: 0 12px 20px #2620331a;
   font: 10px/1.8 var(--font-code);
@@ -917,7 +892,7 @@ button:focus-visible {
 .terminal-heading > span {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-inline);
 }
 .terminal-heading .icon {
   width: 16px;
@@ -1094,7 +1069,7 @@ pre {
     min-height: auto;
   }
   .header-nav {
-    gap: 16px;
+    gap: calc(var(--space-unit) * 4);
   }
   .header-how {
     display: none !important;
@@ -1183,7 +1158,7 @@ pre {
   .feature {
     display: grid;
     grid-template-columns: 24px 1fr;
-    column-gap: 16px;
+    column-gap: calc(var(--space-unit) * 4);
   }
   .feature > .icon {
     grid-row: span 2;
@@ -1393,7 +1368,7 @@ pre {
   flex: none;
 }
 .route-flow:focus-visible {
-  outline: 2px solid var(--focus);
+  outline: var(--focus-width) solid var(--focus);
   outline-offset: 4px;
 }
 .route-flow code {
@@ -1491,7 +1466,7 @@ pre {
 }
 .release-list li {
   display: flex;
-  gap: 16px;
+  gap: calc(var(--space-unit) * 4);
   justify-content: space-between;
   padding: 13px 0;
   border-bottom: 1px solid var(--line);
@@ -1510,7 +1485,7 @@ pre {
   display: flex;
   align-items: flex-start;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(var(--space-unit) * 4);
   margin-block: 24px;
   font-size: 14px;
 }

@@ -732,3 +732,9 @@ FodyWeavers.xsd
 
 .wrangler
 .astro/
+
+.generated/
+.build/
+docs/src/content/docs/
+docs/public/
+docs/.astro/

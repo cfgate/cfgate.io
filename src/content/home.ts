@@ -1,10 +1,10 @@
 export const links = {
   repository: 'https://github.com/cfgate/cfgate',
-  docs: 'https://github.com/cfgate/cfgate#documentation',
+  docs: '/docs/',
   start: 'https://github.com/cfgate/cfgate#quick-start',
   install: 'https://github.com/cfgate/cfgate#getting-started',
-  access: 'https://github.com/cfgate/cfgate/blob/main/docs/access-required.md',
-  contribute: 'https://github.com/cfgate/cfgate/blob/main/CONTRIBUTING.md',
+  access: '/docs/guides/access-required/',
+  contribute: '/docs/contributing/',
   issues: 'https://github.com/cfgate/cfgate/issues',
 }
 

@@ -1,0 +1,52 @@
+@import '../../../src/styles/tokens.css';
+:root {
+  --sl-font: var(--font-body);
+  --sl-font-mono: var(--font-code);
+  --sl-color-accent-low: var(--accent-soft);
+  --sl-color-accent: var(--accent);
+  --sl-color-accent-high: var(--accent-ink);
+  --sl-color-bg: var(--surface);
+  --sl-color-bg-nav: var(--surface);
+  --sl-color-bg-sidebar: var(--surface);
+  --sl-color-hairline: var(--line);
+  --sl-color-hairline-light: var(--line);
+  --sl-color-text: var(--ink);
+  --sl-color-text-accent: var(--accent-ink);
+  --sl-content-width: var(--measure-reading);
+  --sl-content-pad-x: var(--space-content);
+  --sl-text-body: var(--size-text);
+  --sl-text-sm: var(--size-caption);
+}
+:root[data-theme='light'] {
+  --surface: #faf9f7;
+  --surface-raised: #fff;
+  --ink: #1d1d23;
+  --ink-muted: #52515b;
+  --line: #dedbd6;
+  --accent-ink: color-mix(in oklab, var(--accent), black 45%);
+  --accent-soft: color-mix(in oklab, var(--accent) 12%, var(--surface));
+  color-scheme: light;
+}
+.edition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-inline);
+  color: var(--ink-muted);
+  font-size: var(--size-caption);
+}
+.edition a,
+.source-link {
+  color: var(--accent-ink);
+}
+.sl-markdown-content pre {
+  border-radius: var(--radius-control);
+  border: var(--border-subtle);
+}
+.sl-markdown-content table {
+  font-size: var(--size-caption);
+}
+:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--space-unit);
+}

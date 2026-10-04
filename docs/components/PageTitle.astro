@@ -1,0 +1,17 @@
+---
+import manifest from '../../.generated/docs-manifest.json'
+import PageTitle from '@astrojs/starlight/components/PageTitle.astro'
+const page = Astro.locals.starlightRoute.entry.data.cfgate
+---
+
+<p
+  class='edition'
+  data-pagefind-filter={
+    page && manifest.targets.length > 1 ? `edition:${page.targetId}` : undefined
+  }
+>
+  <a href='/'>cfgate.io</a>
+  <span aria-hidden='true'>/</span>
+  {page ? `cfgate ${page.version} · Release documentation` : 'Documentation'}
+</p>
+<PageTitle />
