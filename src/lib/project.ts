@@ -51,7 +51,10 @@ function releases(value: unknown, repo: string): Release[] {
 }
 
 // Each source fails independently; never refresh the timestamp of fallback data.
-export async function loadProjectData(fetcher: typeof fetch = fetch): Promise<ProjectData> {
+export async function loadProjectData(
+  fetcher: typeof fetch = fetch,
+  fallback: ProjectData = projectSnapshot
+): Promise<ProjectData> {
   const signal = AbortSignal.timeout(6000)
   async function get(url: string) {
     const response = await fetcher(url, {
@@ -121,7 +124,7 @@ export async function loadProjectData(fetcher: typeof fetch = fetch): Promise<Pr
     })(),
   ])
   return {
-    releases: releaseResult.status === 'fulfilled' ? releaseResult.value : projectSnapshot.releases,
-    ci: ciResult.status === 'fulfilled' ? ciResult.value : projectSnapshot.ci,
+    releases: releaseResult.status === 'fulfilled' ? releaseResult.value : fallback.releases,
+    ci: ciResult.status === 'fulfilled' ? ciResult.value : fallback.ci,
   }
 }

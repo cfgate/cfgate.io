@@ -18,4 +18,26 @@ custom_domain = true
 enabled = true
 head_sampling_rate = 0.05
 
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[vars]
+ENVIRONMENT = "production"
+
+[triggers]
+crons = ["17 * * * *"]
+
+[[durable_objects.bindings]]
+name = "PROJECT_COORDINATOR"
+class_name = "ProjectCoordinator"
+
+[[migrations]]
+tag = "v1-project-coordinator"
+new_sqlite_classes = ["ProjectCoordinator"]
+
 [previews]
+[previews.vars]
+ENVIRONMENT = "staging"
+
+[previews.durable_objects]
+bindings = []

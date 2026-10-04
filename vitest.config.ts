@@ -3,7 +3,12 @@ import { cloudflareTest } from '@cloudflare/vitest-plugin'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.toml' } })],
+  plugins: [
+    cloudflareTest({
+      wrangler: { configPath: './wrangler.toml' },
+      miniflare: { bindings: { ENVIRONMENT: 'development' } },
+    }),
+  ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -11,5 +16,6 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.ts'],
+    exclude: ['tests/docs/**'],
   },
 })
