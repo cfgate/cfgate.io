@@ -16,6 +16,13 @@ export const notFoundHandler: NotFoundHandler<AppEnv> = async (c: Context<AppEnv
     }
   }
 
+  if (c.req.path.startsWith('/docs/')) {
+    c.header('Cache-Control', 'no-cache')
+    return c.html(
+      '<!doctype html><html lang="en"><meta charset="utf-8"><title>Documentation not published</title><main><h1>Documentation not published</h1><p>This page or edition is not available. Only the current release edition is published.</p><a href="/docs/">Read the published documentation</a></main></html>',
+      404
+    )
+  }
   c.var.logCtx.handler = '404'
   return c.text('Not Found', 404)
 }

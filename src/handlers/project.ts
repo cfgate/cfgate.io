@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import type { AppEnv } from '@/types'
+import { coordinator, servedDocumentation, signalAccess } from './docs'
 import { loadProjectData } from '@/lib/project'
 
 let refresh: Promise<string> | undefined
@@ -11,6 +12,18 @@ const responseHeaders = {
 
 export async function projectHandler(c: Context<AppEnv>): Promise<Response> {
   c.var.logCtx.handler = 'project'
+  const stub = coordinator(c.env)
+  if (stub) {
+    signalAccess(c)
+    const response = await stub.fetch('https://coordinator/project')
+    if (!response.ok) throw new Error('Project coordinator unavailable')
+    const data = (await response.json()) as { documentation: Record<string, unknown> }
+    data.documentation = {
+      ...data.documentation,
+      ...((await servedDocumentation(c.env)) as object),
+    }
+    return new Response(JSON.stringify(data), { headers: responseHeaders })
+  }
   // A fixed key prevents query strings from multiplying upstream requests.
   const key = new Request('https://cfgate.io/api/project')
   const cache = await caches.open('project-v1')
