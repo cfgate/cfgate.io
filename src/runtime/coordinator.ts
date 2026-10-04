@@ -137,6 +137,7 @@ export class Coordinator {
         state.attempts = 0
         state.nextBuildAt = 0
       } else state.counters.unchanged++
+      if (state.phase === 'waiting-for-sources') state.phase = 'ready'
       state.nextCheckAt = this.now() + docsPolicy.checkIntervalMs
       state.lastError = undefined
       return true
