@@ -1,11 +1,55 @@
 import { mkdtemp, rm, chmod, readFile, symlink } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { activate, credentials, productionTrigger } from '../../scripts/site/setup'
+import {
+  activate,
+  credentials,
+  productionTrigger,
+  activationStatus,
+  validateHook,
+} from '../../scripts/site/setup'
 
 const id = '11111111-1111-4111-8111-111111111111'
 describe('local activation', () => {
+  it('installs over an unconfigured legacy 401 only with explicit first-install intent', async () => {
+    const names = vi.fn(async () => [])
+    expect(
+      await activationStatus(new Response(null, { status: 401 }), 'builder', true, names)
+    ).toBeUndefined()
+    expect(names).toHaveBeenCalledOnce()
+    await expect(
+      activationStatus(new Response(null, { status: 401 }), 'builder', false, names)
+    ).rejects.toThrow('--install')
+    for (const key of ['DOCS_ADMIN_TOKEN', 'DOCS_BUILDER_TOKEN'])
+      await expect(
+        activationStatus(new Response(null, { status: 401 }), 'builder', true, async () => [key])
+      ).rejects.toThrow('already configured')
+    await expect(
+      activationStatus(new Response(null, { status: 403 }), 'builder', true, names)
+    ).rejects.toThrow('403')
+  })
+  it('rejects stale credentials and tolerates an authenticated completed installation', async () => {
+    const body = {
+      initialized: true,
+      builderTokenDigest: createHash('sha256').update('builder').digest('hex'),
+    }
+    expect(
+      await activationStatus(Response.json(body), 'builder', false, async () => [])
+    ).toMatchObject({ initialized: true })
+    await expect(
+      activationStatus(Response.json(body), 'different', false, async () => [])
+    ).rejects.toThrow('differs')
+  })
+  it('checks hook identity and main branch without triggering a build', () => {
+    const hook = { deploy_hook_uuid: id, external_script_id: 'worker', branch: 'main' }
+    expect(() => validateHook(hook, 'worker', id)).not.toThrow()
+    expect(() => validateHook({ ...hook, branch: 'dev' }, 'worker', id)).toThrow()
+    expect(() => validateHook(hook, 'other-worker', id)).toThrow()
+    expect(() => validateHook(hook, 'worker', '22222222-2222-4222-8222-222222222222')).toThrow()
+  })
+
   it('retains private credentials across retries and refuses another account', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cfgate-activation-'))
     try {
@@ -71,11 +115,23 @@ describe('local activation', () => {
       configureBuild: vi.fn(async () => {}),
     }
     await expect(activate(steps)).rejects.toThrow('lost response')
-    expect(steps.configureBuild).not.toHaveBeenCalled()
+    expect(steps.configureBuild).toHaveBeenCalledTimes(1)
     await activate(steps)
     expect(steps.deploy).toHaveBeenCalledTimes(1)
     expect(steps.bootstrap).toHaveBeenCalledTimes(1)
-    expect(steps.configureBuild).toHaveBeenCalledTimes(1)
+    expect(steps.configureBuild).toHaveBeenCalledTimes(2)
+  })
+  it('keeps the coordinator dormant until production build configuration succeeds', async () => {
+    const steps = {
+      status: vi.fn(async () => ({ initialized: false })),
+      deploy: vi.fn(async () => {}),
+      bootstrap: vi.fn(async () => {}),
+      configureBuild: vi.fn(async () => {
+        throw new Error('settings failed')
+      }),
+    }
+    await expect(activate(steps)).rejects.toThrow('settings failed')
+    expect(steps.bootstrap).not.toHaveBeenCalled()
   })
   it('retries build settings without changing initialized state', async () => {
     const steps = {
