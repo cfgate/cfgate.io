@@ -48,6 +48,20 @@ export class ProjectCoordinator extends DurableObject<Bindings> {
       }
       if (this.env.ENVIRONMENT !== 'production')
         return new Response('Read-only environment', { status: 403 })
+      if (path === '/status') {
+        const state = await this.coordinator.state()
+        const bytes = await crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(this.env.DOCS_BUILDER_TOKEN ?? '')
+        )
+        const builderTokenDigest = Array.from(new Uint8Array(bytes), (b) =>
+          b.toString(16).padStart(2, '0')
+        ).join('')
+        return Response.json(
+          { initialized: state.initialized, builderTokenDigest },
+          { headers: { 'Cache-Control': 'no-store' } }
+        )
+      }
       if (path === '/signal' || path === '/access') {
         const body = z
           .object({ delivery: z.uuid().optional() })
