@@ -1,31 +1,29 @@
 {
-  "name": "cfgate-infra",
+  "name": "cfgate-website",
   "version": "0.3.1",
-  "description": "https://cfgate.io",
+  "description": "cfgate website, released documentation and project APIs",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
     "dev": "astro dev",
-    "build": "tsx scripts/docs/build.ts",
+    "build": "tsx scripts/site/build.ts",
     "preview": "astro preview",
     "check": "astro check",
     "format": "prettier --write .",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
-    "deploy": "pnpm docs:publish",
+    "deploy": "tsx scripts/site/publish.ts",
     "types": "wrangler types src/worker-configuration.d.ts",
     "typecheck": "pnpm types && astro check && tsc --noEmit",
     "test": "vitest run && vitest run --config vitest.docs.config.ts",
     "test:watch": "vitest",
     "tail": "wrangler tail",
-    "tail:prod": "pnpm run tail",
     "prepare": "pnpm types",
     "docs:prepare": "tsx scripts/docs/prepare.ts",
     "docs:build": "astro build --root docs",
     "docs:dev": "pnpm docs:prepare && astro dev --root docs",
-    "docs:publish": "tsx scripts/docs/publish.ts",
-    "deploy:bootstrap": "pnpm exec wrangler deploy",
-    "test:docs": "vitest run --config vitest.docs.config.ts"
+    "test:docs": "vitest run --config vitest.docs.config.ts",
+    "setup": "tsx scripts/site/setup.ts"
   },
   "author": "inherent.design",
   "license": "Apache-2.0",
@@ -86,5 +84,6 @@
     "unist-util-visit": "^5.1.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
-  }
+  },
+  "private": true
 }

@@ -738,3 +738,6 @@ FodyWeavers.xsd
 docs/src/content/docs/
 docs/public/
 docs/.astro/
+
+# Local activation credentials and interrupted deployment receipts
+.activation/

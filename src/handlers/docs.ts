@@ -22,7 +22,11 @@ export async function secretMatches(actual: string, expected: string): Promise<b
 }
 export async function docsBuildHandler(c: Context<AppEnv>): Promise<Response> {
   if (!production(c.req.raw, c.env)) return c.text('Read-only environment', 403)
-  const reconcile = ['/internal/docs/reconcile', '/internal/docs/bootstrap'].includes(c.req.path)
+  const reconcile = [
+    '/internal/docs/reconcile',
+    '/internal/docs/bootstrap',
+    '/internal/docs/status',
+  ].includes(c.req.path)
   const expected = reconcile ? c.env.DOCS_ADMIN_TOKEN : c.env.DOCS_BUILDER_TOKEN
   if (
     !(await secretMatches(
@@ -37,6 +41,11 @@ export async function docsBuildHandler(c: Context<AppEnv>): Promise<Response> {
   try {
     const text = await boundedText(c.req.raw, 4096)
     const body = text ? JSON.parse(text) : {}
+    if (path === '/status') {
+      z.object({}).strict().parse(body)
+      c.header('Cache-Control', 'no-store')
+      return stub.fetch('https://coordinator/status', { method: 'POST' })
+    }
     if (path === '/bootstrap') {
       z.object({}).strict().parse(body)
       if (!c.env.ASSETS || !c.env.CF_VERSION_METADATA)

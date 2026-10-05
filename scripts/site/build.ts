@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { validatePlan } from '../../src/docs/contracts.js'
 import { Github } from '../../src/docs/github.js'
-import { localPlan, prepare } from './prepare.js'
+import { localPlan, prepare } from '../docs/prepare.js'
 
 export async function coordinatorRequest(path: string, body: unknown): Promise<Response> {
   if (!process.env.DOCS_BUILDER_TOKEN)
@@ -52,7 +52,7 @@ if (process.argv[1]?.endsWith('/build.ts')) {
       ['exec', 'tsc', '--noEmit', '-p', 'tsconfig.docs.json'],
       ['exec', 'astro', 'build'],
       ['docs:build'],
-      ['exec', 'tsx', 'scripts/docs/assemble.ts'],
+      ['exec', 'tsx', 'scripts/site/assemble.ts'],
     ])
       execFileSync('pnpm', args, { stdio: 'inherit' })
     const { validateOutput } = await import('./validate.js')

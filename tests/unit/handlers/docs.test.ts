@@ -37,6 +37,23 @@ function bindings() {
   }
 }
 describe('documentation request boundaries', () => {
+  it('reserves activation status for administrators, including on production', async () => {
+    for (const token of ['', 'builder', 'admin']) {
+      const { env, fetcher } = bindings()
+      const response = await app.request(
+        'https://cfgate.io/internal/docs/status',
+        {
+          method: 'POST',
+          body: '{}',
+          headers: { Authorization: `Bearer ${token}` },
+        },
+        env
+      )
+      expect(response.status).toBe(token === 'admin' ? 202 : 401)
+      expect(fetcher).toHaveBeenCalledTimes(token === 'admin' ? 1 : 0)
+    }
+  })
+
   it('accepts a verified release notification only after durable acknowledgement', async () => {
     const { env, fetcher } = bindings()
     const body = JSON.stringify({ action: 'published', repository: { full_name: 'cfgate/cfgate' } })

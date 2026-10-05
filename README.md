@@ -46,7 +46,8 @@ Worker tests run in the local Cloudflare runtime. Node tests cover source select
 | `src/index.ts`, `src/handlers`               | Worker routing, APIs, assets and proxies                           |
 | `src/docs`                                   | Validated source contracts, release policy and GitHub reads        |
 | `src/runtime`                                | Durable coordination and guarded Cloudflare publication            |
-| `scripts/docs`                               | Pinned-source preparation, reference generation and build commands |
+| `scripts/docs`                               | Pinned-source preparation and reference generation                 |
+| `scripts/site`                               | Whole-site build, assembly, validation, activation and publication |
 | `docs/astro.config.ts`, `docs/integration`   | Isolated Starlight renderer and cfgate integration                 |
 | `docs/bootstrap.json`                        | Explicit local/initial source pins                                 |
 | `src/data/project.json`                      | Dated project-data fallback                                        |
@@ -59,7 +60,7 @@ The Durable Object owns project observations and build coordination. Pages initi
 
 Access checks use a 30-minute threshold. An hourly schedule and signed GitHub release webhooks provide independent triggers. Changed normalized inputs request a Cloudflare Workers Build; unchanged observations do not. A successful compilation is uploaded as a candidate and published only if its release, renderer, generation and lease remain eligible.
 
-The served documentation version comes from the deployed manifest, never from the newest observed release. Failed or superseded builds leave the previous edition online. See [operations](docs/operations.md) for the required one-time migration, secrets, build commands and failure recovery. Pull requests and GitHub Actions do not publish production.
+The served documentation version comes from the deployed manifest, never from the newest observed release. Failed or superseded builds leave the previous edition online. Run `pnpm setup` to inspect the one-time activation plan. [Operations](docs/operations.md) describes credentials, `pnpm setup --apply`, production build settings and recovery. Setup is a local administrative operation; routine publication uses `pnpm deploy` inside Workers Builds. Pull requests and GitHub Actions do not publish production.
 
 When the coordinator binding is absent, previews retain the legacy project-data cache and dated snapshot fallback. The browser revalidates the API on each visit; its per-location Worker cache lasts 30 minutes. This fallback cache is not publication authority.
 

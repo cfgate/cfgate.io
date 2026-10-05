@@ -219,6 +219,26 @@ describe('durable publication lifecycle', () => {
 })
 
 describe('bootstrap isolation', () => {
+  it('acknowledges an identical bootstrap retry without resetting pending work', async () => {
+    const s = setup(false)
+    const { makePlan, digest } = await import('../../src/docs/contracts')
+    const plan = await makePlan('a'.repeat(40), await digest(docsPolicy), [s.target])
+    s.setActive(versionId)
+    await s.engine.bootstrap(plan, versionId, new Date().toISOString())
+    await s.engine.forceRebuild()
+    const before = await s.engine.state()
+    await s.engine.bootstrap(plan, versionId, new Date().toISOString())
+    expect(await s.engine.state()).toEqual(before)
+    const different = await makePlan('b'.repeat(40), await digest(docsPolicy), [s.target])
+    await expect(
+      s.engine.bootstrap(different, versionId, new Date().toISOString())
+    ).rejects.toThrow('already initialized')
+    s.setActive(id)
+    await expect(s.engine.bootstrap(plan, versionId, new Date().toISOString())).rejects.toThrow(
+      'active deployment'
+    )
+  })
+
   it('does not let visitors race source selection before explicit initialization', async () => {
     const s = setup(false)
     await s.engine.signal()

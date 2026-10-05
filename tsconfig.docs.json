@@ -1,7 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "include": [
-    "scripts/docs/**/*.ts",
+    "scripts/**/*.ts",
     "docs/navigation.ts",
     "docs/integration/index.ts",
     "tests/docs/**/*.ts",

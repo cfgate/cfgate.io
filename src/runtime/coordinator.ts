@@ -308,10 +308,18 @@ export class Coordinator {
   async bootstrap(plan: DocsBuildPlan, versionId: string, builtAt: string): Promise<void> {
     return this.serial(async () => {
       const state = await this.state()
-      if (state.published || state.publishing || state.desired)
-        throw new Conflict('Coordinator already initialized')
       if ((await this.provider.activeVersion()) !== versionId)
         throw new Conflict('Bootstrap must identify the active deployment')
+      if (state.initialized || state.published || state.publishing || state.desired) {
+        if (
+          state.initialized &&
+          !state.publishing &&
+          state.published?.workerVersionId === versionId &&
+          state.published.plan.buildKey === plan.buildKey
+        )
+          return
+        throw new Conflict('Coordinator already initialized')
+      }
       this.pin(state, plan)
       state.initialized = true
       state.phase = 'ready'

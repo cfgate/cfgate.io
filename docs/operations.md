@@ -2,41 +2,71 @@
 
 Production documentation builds run in Cloudflare Workers Builds. GitHub Actions validates pull requests. Production activation requires the migration below; merging the code alone does not configure deploy hooks or credentials.
 
+## What activation changes
+
+Activation installs the coordinator once and connects the production builder to it. A Durable Object is Cloudflare-managed code and persistent storage attached to this Worker through a binding. You do not provision or maintain a separate server. The object stores observations, source plans and publication state; documentation HTML and `/docs/manifest.json` remain static site assets.
+
+Routine deployments upload candidates, then ask the coordinator to publish eligible output. They do not recreate the object or its history. New Durable Object lifecycle migrations still require a reviewed maintenance deployment with `wrangler deploy`.
+
+`DOCS_BUILDER_TOKEN` is a random application credential. The production build sends it to the Worker's claim, candidate and failure endpoints. The same value must exist in **two Cloudflare settings**: the Worker's runtime secrets and its production build trigger's secrets. GitHub Actions only validates the repository and does not need this token.
+
+Build environment variables and runtime bindings are separate. Wrangler `[vars]` does not export arbitrary values into the shell running `pnpm build`. `.node-version` and `package.json`'s `packageManager` pin select tools; they are not secret provisioning mechanisms. Ordinary build configuration belongs in repository code. Secrets belong in the relevant Cloudflare settings.
+
 ## First deployment
 
-Pause automatic production builds while introducing the coordinator. Keep the current website deployment online. After the reviewed code reaches `main`:
+The local setup command configures an existing website Worker and its existing production Git connection. It does not create the Cloudflare GitHub App authorization, generate a Cloudflare API token, create a deploy hook or configure GitHub webhooks.
 
-1. Sync a clean local `main` checkout. Review `docs/bootstrap.json`; its commits must identify the intended released operator and matching chart.
-2. Run `pnpm install --frozen-lockfile`, `pnpm build` and `pnpm test` locally. The local build uses the explicit bootstrap pins and does not claim production work.
-3. Deploy once with `pnpm deploy:bootstrap`. This runs `wrangler deploy`, which installs the `ProjectCoordinator` Durable Object migration. Routine version upload cannot perform that lifecycle migration.
-4. Install the production Worker secrets below. Create a deploy hook for the website's `main` branch in Workers **Settings > Builds > Deploy Hooks**. Keep its URL secret.
-5. Configure the production build command as `pnpm build` and deploy command as `pnpm docs:publish`. Set the production build's `DOCS_BUILDER_TOKEN` to the same secret used by the Worker. Keep the preview command as `npx wrangler preview`; previews use the checked-in pins and have no coordinator binding.
-6. Seed the coordinator from the deployed asset manifest, then enable automatic builds and repository webhooks.
+Before applying setup:
 
-The seeding request has no caller-supplied source plan. The Worker reads its own assets and version metadata, and the coordinator checks that Cloudflare is serving that version:
+1. Pause automatic production builds and wait for active builds to finish. Keep the current deployment online throughout preparation.
+2. Merge the reviewed setup code, then sync a clean local `main`. Review the released operator and chart pins in `docs/bootstrap.json`.
+3. Create a deploy hook for this Worker's `main` branch under **Settings > Builds > Deploy Hooks**.
+4. Supply the environment below through your local secret manager. This repository's `mise.toml` can load `secrets.enc.yaml`; a local SOPS key decrypts that file. Do not transfer the age key into Workers Builds just to configure the builder token.
+
+| Local variable          | Purpose                                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID` | Account containing `cfgate-service-worker`; an identifier, not a secret                                                                                             |
+| `CLOUDFLARE_API_TOKEN`  | User-scoped setup token with Workers Builds Configuration Edit, Workers Scripts Edit and the permissions needed by Wrangler for this Worker's routes and deployment |
+| `DOCS_TRIGGER_ID`       | UUID of this Worker's production build trigger, selecting only `main`                                                                                               |
+| `DOCS_BUILD_HOOK`       | Secret URL of the `main` deploy hook                                                                                                                                |
+| `DOCS_DEPLOY_TOKEN`     | Separate runtime token with Workers Scripts read/write in this account; used for candidate verification and publication                                             |
+
+Cloudflare's Builds API requires a user-scoped token; an account-scoped token can fail even when Worker deployment works. The setup token and the build system's own upload token have different roles. See the [Builds API reference](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/) for trigger IDs and permissions.
 
 ```sh
-curl --fail-with-body -X POST https://cfgate.io/internal/docs/bootstrap \
-  -H "Authorization: Bearer $DOCS_ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' --data '{}'
+pnpm install --frozen-lockfile
+pnpm setup             # Print the plan; no writes or credentials required
+pnpm setup --apply     # Apply from clean, current main with the variables above
 ```
 
-Set secrets through the dashboard or interactive Wrangler prompts, for example `pnpm exec wrangler secret put DOCS_BUILDER_TOKEN`. Do not commit them or print them in build logs.
+With Mise-managed secrets, run `mise run pnpm setup --apply` instead. Setup generates separate builder/admin tokens once and retains them in `.activation/credentials.json` with owner-only access. The directory is ignored by Git. Back it up in your secret manager; it contains plaintext credentials, not encrypted SOPS data. Reuse it on retries, and restore it when moving setup to another host. Do not delete it to fix an authentication failure.
 
-| Secret                  | Installed in                                       | Purpose                                                                         |
-| ----------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `GITHUB_READ_TOKEN`     | Production Worker                                  | Optional read-only GitHub token for metadata                                    |
-| `GITHUB_TOKEN`          | Build environment                                  | Optional read-only token for pinned source retrieval                            |
-| `GITHUB_WEBHOOK_SECRET` | Production Worker and repository webhook settings  | HMAC verification                                                               |
-| `DOCS_BUILD_HOOK`       | Production Worker                                  | Secret Cloudflare build-hook URL for `main`                                     |
-| `DOCS_ACCOUNT_ID`       | Production Worker                                  | Cloudflare account containing the website Worker                                |
-| `DOCS_DEPLOY_TOKEN`     | Production Worker                                  | Cloudflare Workers Scripts read/write for candidate verification and deployment |
-| `DOCS_BUILDER_TOKEN`    | Production Worker and production build environment | Claims, candidates and failure reports                                          |
-| `DOCS_ADMIN_TOKEN`      | Production Worker and administrator's secret store | Bootstrap, source checks and explicit rebuilds                                  |
+The command validates the account, Worker and production trigger. If the coordinator is absent and the site has no documentation manifest, it builds and tests the site, then deploys the Worker, assets, migration and runtime secrets together using `wrangler deploy --secrets-file`. If that deployment already completed, a retry observes its status and continues without deploying again. An authenticated bootstrap request reads the Worker's own manifest and verifies its active Cloudflare version before recording publication state.
 
-Workers Builds also needs its normal Cloudflare upload credentials. Scope credentials to the smallest available account/repository permissions. Build jobs remain trusted: their Cloudflare upload credential can have broader platform capabilities than the application guard. Do not supply production build or deployment secrets to pull-request builds. The repository's preview configuration removes the coordinator binding and uses `ENVIRONMENT=staging`; mutation handlers also require the production hostname.
+After initialization is confirmed, setup configures `pnpm build` and `pnpm deploy` on the production trigger and installs the matching `DOCS_BUILDER_TOKEN` as a build secret. It leaves preview settings unchanged. Resume automatic builds after setup succeeds; preview deployments should continue using `npx wrangler preview`.
 
-Use `.node-version` and `package.json`'s `packageManager` pin for build tools. No manually maintained Node/pnpm version variables are required.
+These steps are resumable, not a transaction across Cloudflare services. Failed configuration can leave partial setup that needs a retry with the same credentials. An initialized coordinator is never reset, and setup does not redeploy the original edition over newer documentation. Setup is not a general secret-rotation or migration tool. Authentication failures, unknown deployment state and conflicting bootstrap requests stop it for investigation.
+
+If the process is forcibly terminated during deployment, a private temporary secrets file can remain under `.activation/deploy-*`. Remove that temporary directory after recovery; preserve `credentials.json`. Do not run setup concurrently or resume automatic builds during activation.
+
+## Credential placement
+
+| Variable                | Installed in                                                       | Purpose                                                       |
+| ----------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `DOCS_BUILDER_TOKEN`    | Worker and production Workers Builds trigger, by setup             | Claims, candidates and failure reports                        |
+| `DOCS_ADMIN_TOKEN`      | Worker and local credential store, by setup                        | Initialization, status and manual reconciliation              |
+| `DOCS_ACCOUNT_ID`       | Worker, by setup                                                   | Account identifier for publication API calls                  |
+| `DOCS_DEPLOY_TOKEN`     | Worker, by setup                                                   | Verify and publish candidates                                 |
+| `DOCS_BUILD_HOOK`       | Worker, by setup                                                   | Request a production build                                    |
+| `GITHUB_READ_TOKEN`     | Optional Worker secret; forwarded if supplied during initial setup | Read-only metadata access                                     |
+| `GITHUB_TOKEN`          | Optional build variable, configured separately                     | Read-only pinned source retrieval                             |
+| `GITHUB_WEBHOOK_SECRET` | Worker and repository webhook settings                             | HMAC verification; forwarded if supplied during initial setup |
+
+The Worker's **Settings > Variables and Secrets** holds runtime credentials. **Settings > Builds > Variables and Secrets** holds build credentials. Setup uses the Builds API to install the shared builder value; there is no need to copy it manually. Existing unrelated build variables are preserved.
+
+The `cfgate/cfgate` operator repository uses an Actions secret named `MISE_SOPS_AGE_KEY` for release/E2E decryption. That secret is not automatically shared with this repository or Cloudflare. This website's Actions workflow uses GitHub's automatic token for source reads and performs no SOPS decryption or production publication.
+
+Preview builds must not receive production publication credentials. Their Wrangler configuration removes the coordinator binding and uses `ENVIRONMENT=staging`; mutation endpoints also require the production hostname. Workers Builds retains its normal Cloudflare upload credential independently of application authentication.
 
 ## GitHub notifications
 
