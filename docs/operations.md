@@ -112,6 +112,8 @@ Connect the Worker to `cfgate/cfgate.io` through **Settings > Builds**, authoriz
 
 Hold production builds before merging activation changes. `exit 1` makes new builds fail deliberately without changing the live site; it does not cancel already running builds. Wait for those builds to finish or cancel them before maintenance. Keep the connection intact: disconnecting deletes the trigger identity used by setup.
 
+Check preview settings separately, including **Previews Base** if the dashboard exposes it. Preview builds use `pnpm build` and `pnpm exec wrangler preview`; they must not retain the production activation hold of `exit 1`. Setup updates the production trigger only, so confirm a branch preview completes before merging.
+
 Keep production credentials scoped to production builds. The repository's preview configuration uses `ENVIRONMENT=staging` and removes the coordinator binding, and mutation endpoints require the production hostname. A raw Worker Version URL is not evidence of isolated resources. Do not treat a preview-looking URL as the isolation control.
 
 ### 2. Encrypted preparation and provisioning
