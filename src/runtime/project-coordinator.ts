@@ -96,7 +96,7 @@ export class ProjectCoordinator extends DurableObject<Bindings> {
       if (error instanceof Conflict) return new Response(error.message, { status: 409 })
       console.error(
         'docs_coordinator_error',
-        error instanceof Error ? error.message : 'Unknown error'
+        error instanceof Error ? (error.stack ?? error.message) : 'Unknown error'
       )
       return new Response('Coordinator unavailable', { status: 503 })
     }
