@@ -182,6 +182,32 @@ describe('remote provisioning', () => {
       expect(api.mock.calls.filter(([, method]) => method === 'PATCH')).toHaveLength(2)
     })
   })
+  it('adds release notifications without replacing existing or concurrent subscriptions', async () => {
+    await fixture(async (store) => {
+      store.values.GITHUB_WEBHOOK_SECRET = 's'.repeat(64)
+      const subscriptions = new Map(
+        deployment.webhookRepositories.map((repo) => [repo, ['workflow_run']])
+      )
+      const api: API = async (path, method, input) => {
+        const repo = deployment.webhookRepositories.find((repo) => path.startsWith(`${repo}/`))!
+        if (!method) {
+          // Another administrator adds an event after the inventory snapshot.
+          subscriptions.get(repo)!.push('issues')
+          return [{ id: 12, events: ['workflow_run'], config: { url: deployment.webhookURL } }]
+        }
+        const body = input as { events?: string[]; add_events?: string[] }
+        if (body.events) subscriptions.set(repo, body.events)
+        else
+          subscriptions.set(repo, [
+            ...new Set([...subscriptions.get(repo)!, ...(body.add_events ?? [])]),
+          ])
+        return {}
+      }
+      await provisionGithub(api, store, true)
+      for (const events of subscriptions.values())
+        expect(events).toEqual(['workflow_run', 'issues', 'release'])
+    })
+  })
   it('rejects duplicate webhook destinations and sanitizes provider errors', async () => {
     await fixture(async (store) => {
       store.values.GITHUB_WEBHOOK_SECRET = 's'.repeat(64)
