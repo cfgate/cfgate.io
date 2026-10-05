@@ -1,97 +1,23 @@
 import { execFileSync } from 'node:child_process'
-import { randomBytes, createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile, lstat, mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, mkdir, lstat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { resolve } from 'node:path'
 import { z } from 'zod'
+import { activationDigest } from '../../src/runtime/activation.js'
+import { SecretStore, prepareSecrets } from './secrets.js'
+import {
+  deployment,
+  cloudflareAPI,
+  githubAPI,
+  provisionCloudflare,
+  provisionGithub,
+} from './provision.js'
 
 const origin = 'https://cfgate.io'
-const worker = 'cfgate-service-worker'
-const credentialsSchema = z
-  .object({
-    accountId: z.string().regex(/^[a-f0-9]{32}$/),
-    DOCS_ADMIN_TOKEN: z.string().min(32),
-    DOCS_BUILDER_TOKEN: z.string().min(32),
-  })
-  .strict()
-type Credentials = z.infer<typeof credentialsSchema>
-
-export async function credentials(directory: string, accountId: string): Promise<Credentials> {
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  const dir = await lstat(directory)
-  if (!dir.isDirectory() || (dir.mode & 0o077) !== 0)
-    throw new Error('Activation directory must be private (mode 700), and not a symlink')
-  const path = `${directory}/credentials.json`
-  try {
-    const info = await lstat(path)
-    if (!info.isFile() || (info.mode & 0o077) !== 0)
-      throw new Error('Activation credentials must be a private regular file (mode 600)')
-    const stored = credentialsSchema.parse(JSON.parse(await readFile(path, 'utf8')))
-    if (stored.accountId !== accountId)
-      throw new Error('Activation credentials belong to another account')
-    return stored
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
-  const value = credentialsSchema.parse({
-    accountId,
-    DOCS_ADMIN_TOKEN: randomBytes(32).toString('hex'),
-    DOCS_BUILDER_TOKEN: randomBytes(32).toString('hex'),
-  })
-  // Exclusive creation prevents a second setup process from rotating our secrets.
-  await writeFile(path, JSON.stringify(value), { flag: 'wx', mode: 0o600 })
-  return value
-}
-
-export function productionTrigger(input: unknown, workerTag: string, triggerId: string) {
-  const triggers = z
-    .array(
-      z.object({
-        trigger_uuid: z.uuid(),
-        external_script_id: z.string(),
-        branch_includes: z.array(z.string()),
-        branch_excludes: z.array(z.string()),
-        repo_connection: z.object({
-          provider_type: z.literal('github'),
-          provider_account_name: z.literal('cfgate'),
-          repo_name: z.literal('cfgate.io'),
-        }),
-      })
-    )
-    .parse(input)
-  const trigger = triggers.find((t) => t.trigger_uuid === triggerId)
-  if (
-    !trigger ||
-    trigger.external_script_id !== workerTag ||
-    trigger.branch_includes.length !== 1 ||
-    trigger.branch_includes[0] !== 'main' ||
-    trigger.branch_excludes.length !== 0
-  )
-    throw new Error(
-      'Select the website production trigger with only main included and no exclusions'
-    )
-  return trigger
-}
-
-export function validateHook(input: unknown, workerTag: string, hookId: string): void {
-  const hook = z
-    .object({
-      deploy_hook_uuid: z.uuid(),
-      external_script_id: z.string(),
-      branch: z.string(),
-    })
-    .parse(input)
-  if (
-    hook.deploy_hook_uuid !== hookId ||
-    hook.external_script_id !== workerTag ||
-    hook.branch !== 'main'
-  )
-    throw new Error('Deploy hook must belong to this Worker and target main')
-}
-
 export async function activationStatus(
   response: Response,
-  builderToken: string,
+  configurationDigest: string,
   install: boolean,
   secretNames: () => Promise<string[]>
 ): Promise<{ initialized: boolean } | undefined> {
@@ -110,11 +36,11 @@ export async function activationStatus(
       `Activation status returned ${response.status}; preserve credentials and investigate`
     )
   const state = z
-    .object({ initialized: z.boolean(), builderTokenDigest: z.string() })
+    .object({ initialized: z.boolean(), configurationDigest: z.string() })
     .parse(await response.json())
-  if (state.builderTokenDigest !== createHash('sha256').update(builderToken).digest('hex'))
+  if (state.configurationDigest !== configurationDigest)
     throw new Error(
-      'Stored builder credential differs from the deployed Worker; restore the matching credential'
+      'Encrypted runtime configuration differs from the Worker; restore matching values or use a reviewed maintenance deployment'
     )
   return state
 }
@@ -144,167 +70,175 @@ export async function activate(steps: ActivationSteps): Promise<void> {
 
 async function main() {
   const args = process.argv.slice(2)
-  if (args.some((arg) => !['--apply', '--install'].includes(arg)))
-    throw new Error('Usage: pnpm run setup [--apply [--install]]')
-  if (!args.includes('--apply')) {
-    console.log(`One-time activation plan (no writes):
-1. Validate a clean production checkout and Cloudflare production trigger.
-2. Retain generated builder/admin credentials in private .activation/credentials.json.
-3. Install the first Worker, assets, migration and runtime secrets together if absent.
-4. Set production build authentication and commands, then initialize the coordinator.
+  const modes = ['--prepare', '--provision', '--apply']
+  if (
+    args.some((arg) => ![...modes, '--install'].includes(arg)) ||
+    args.filter((arg) => modes.includes(arg)).length > 1 ||
+    (args.includes('--install') && !args.includes('--apply'))
+  )
+    throw new Error('Usage: pnpm run setup [--prepare | --provision | --apply [--install]]')
+  if (!args.length) {
+    console.log(`Setup plan (no writes):
+1. --prepare generates missing application keys in SOPS-encrypted secrets.enc.yaml.
+2. --provision discovers the main build trigger, creates/reuses its deploy hook,
+   records their identities encrypted, and stages inactive GitHub release webhooks.
+3. Commit and merge the configuration, then sync clean main.
+4. --apply --install deploys and initializes once; --apply resumes after installation.
 
-For first installation, use --apply --install. For retries, use --apply.
-Pause automatic production builds and wait for running builds to finish before either.
-Required environment: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN,
-DOCS_TRIGGER_ID, DOCS_BUILD_HOOK and DOCS_DEPLOY_TOKEN.
-Keep .activation/ backed up securely. See docs/operations.md for permissions and recovery.`)
+CLOUDFLARE_SETUP_TOKEN needs user-scoped Workers Builds Configuration Edit and
+Workers Scripts Read. Existing CLOUDFLARE_API_TOKEN is used for deployment.
+Account identity is in deployment.json. No age key is sent to Cloudflare or GitHub.
+Hold production builds and wait for running builds before --apply.
+See docs/operations.md for token creation and maintenance.`)
     return
   }
   if (process.env.CI || process.env.WORKERS_CI)
-    throw new Error('Activation must run locally, outside CI')
-  const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim()
-  if (git('branch', '--show-current') !== 'main' || git('status', '--porcelain'))
-    throw new Error('Activation requires a clean main checkout')
-  const head = git('rev-parse', 'HEAD')
-  const remote = git(
-    '-c',
-    'credential.helper=!gh auth git-credential',
-    'ls-remote',
-    'https://github.com/cfgate/cfgate.io.git',
-    'refs/heads/main'
-  ).split(/\s/)[0]
-  if (head !== remote) throw new Error('Sync local main with cfgate/cfgate.io before activation')
-  const env = z
-    .object({
-      CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
-      CLOUDFLARE_API_TOKEN: z.string().min(1),
-      DOCS_TRIGGER_ID: z.uuid(),
-      DOCS_DEPLOY_TOKEN: z.string().min(1),
-      DOCS_BUILD_HOOK: z
-        .string()
-        .regex(
-          /^https:\/\/api\.cloudflare\.com\/client\/v4\/workers\/builds\/deploy_hooks\/[a-zA-Z0-9_-]+$/
-        ),
-    })
-    .parse(process.env)
-  const account = env.CLOUDFLARE_ACCOUNT_ID
-  async function api(path: string, body?: unknown, token = env.CLOUDFLARE_API_TOKEN) {
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${account}/${path}`,
-      {
-        method: body === undefined ? 'GET' : 'PATCH',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        redirect: 'error',
-        signal: AbortSignal.timeout(30000),
-      }
-    )
-    // Do not log provider payloads, which can contain credentials or hook URLs.
-    if (!response.ok)
-      throw new Error(
-        `Cloudflare setup request failed (${response.status}); check user-token permissions`
+    throw new Error('Setup must run locally, outside CI')
+  // Serialize setup commands. A hard interruption leaves this lock for deliberate inspection.
+  await mkdir('.activation', { recursive: true, mode: 0o700 })
+  if (!(await lstat('.activation')).isDirectory())
+    throw new Error('Setup directory must not be a symlink')
+  const lock = '.activation/setup.lock'
+  await writeFile(lock, String(process.pid), { flag: 'wx', mode: 0o600 })
+  try {
+    const store = await new SecretStore().load()
+    if (args.includes('--prepare')) {
+      await prepareSecrets(store, deployment.accountId)
+      console.log(
+        'Application credentials are preserved in secrets.enc.yaml. Review and commit ciphertext only.'
       )
-    const result = z
-      .object({ success: z.boolean(), result: z.unknown() })
-      .parse(await response.json())
-    if (!result.success) throw new Error('Cloudflare rejected setup request')
-    return result.result
-  }
-  const scripts = z
-    .array(z.object({ id: z.string(), tag: z.string() }))
-    .parse(await api('workers/scripts'))
-  const tag = scripts.find((s) => s.id === worker)?.tag
-  if (!tag) throw new Error('Existing cfgate-service-worker was not found in this account')
-  productionTrigger(await api(`builds/workers/${tag}/triggers`), tag, env.DOCS_TRIGGER_ID)
-  await api(`builds/triggers/${env.DOCS_TRIGGER_ID}/environment_variables`)
-  const hookId = z.uuid().parse(new URL(env.DOCS_BUILD_HOOK).pathname.split('/').at(-1))
-  validateHook(await api(`builds/workers/${worker}/deploy_hooks/${hookId}`), tag, hookId)
-  await api(`workers/scripts/${worker}/deployments`, undefined, env.DOCS_DEPLOY_TOKEN)
-  const secretNames = async () =>
-    z
-      .array(z.object({ name: z.string() }))
-      .parse(await api(`workers/scripts/${worker}/secrets`))
-      .map((s) => s.name)
-
-  const stored = await credentials('.activation', account)
-  async function request(path: string): Promise<Response> {
-    return fetch(`${origin}/internal/docs/${path}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${stored.DOCS_ADMIN_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: '{}',
-      redirect: 'error',
-      signal: AbortSignal.timeout(30000),
-    })
-  }
-  await activate({
-    async status() {
-      return activationStatus(
-        await request('status'),
-        stored.DOCS_BUILDER_TOKEN,
-        args.includes('--install'),
-        secretNames
-      )
-    },
-    async deploy() {
-      console.log('Building and checking the complete site for initial deployment')
-      execFileSync('pnpm', ['build'], { stdio: 'inherit' })
-      execFileSync('pnpm', ['test'], { stdio: 'inherit' })
-      const temporary = await mkdtemp('.activation/deploy-')
-      const secretsPath = resolve(temporary, 'secrets.json')
-      const secrets = {
-        DOCS_ACCOUNT_ID: account,
-        DOCS_DEPLOY_TOKEN: env.DOCS_DEPLOY_TOKEN,
-        DOCS_BUILD_HOOK: env.DOCS_BUILD_HOOK,
-        DOCS_ADMIN_TOKEN: stored.DOCS_ADMIN_TOKEN,
-        DOCS_BUILDER_TOKEN: stored.DOCS_BUILDER_TOKEN,
-        ...(process.env.GITHUB_READ_TOKEN
-          ? { GITHUB_READ_TOKEN: process.env.GITHUB_READ_TOKEN }
-          : {}),
-        ...(process.env.GITHUB_WEBHOOK_SECRET
-          ? { GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET }
-          : {}),
+      return
+    }
+    for (const key of ['DOCS_ADMIN_TOKEN', 'DOCS_BUILDER_TOKEN', 'GITHUB_WEBHOOK_SECRET'])
+      if (!store.values[key] || store.values[key].length < 32)
+        throw new Error('Run setup --prepare first')
+    const api = cloudflareAPI(store.values.CLOUDFLARE_SETUP_TOKEN)
+    if (args.includes('--provision')) {
+      // Each service can progress independently. Save successful work before reporting failures.
+      const failures: string[] = []
+      try {
+        await provisionCloudflare(api, store, true)
+        console.log('Cloudflare trigger and deploy hook recorded in encrypted configuration.')
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : 'Cloudflare provisioning failed')
       }
       try {
-        await writeFile(secretsPath, JSON.stringify(secrets), { mode: 0o600, flag: 'wx' })
-        execFileSync('pnpm', ['exec', 'wrangler', 'deploy', '--secrets-file', secretsPath], {
-          stdio: 'inherit',
-        })
-      } finally {
-        await rm(temporary, { recursive: true, force: true })
+        await provisionGithub(githubAPI, store, false)
+        console.log('GitHub release webhooks staged; existing hooks left unchanged.')
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : 'GitHub provisioning failed')
       }
-    },
-    async bootstrap() {
-      const response = await request('bootstrap')
-      if (!response.ok)
-        throw new Error(
-          `Bootstrap returned ${response.status}; retry with the same credentials after investigating`
+      if (failures.length) throw new Error(failures.join('\n'))
+      console.log('Provisioning complete. Commit encrypted configuration before activation.')
+      return
+    }
+    const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim()
+    if (git('branch', '--show-current') !== 'main' || git('status', '--porcelain'))
+      throw new Error('Activation requires a clean main checkout')
+    const head = git('rev-parse', 'HEAD')
+    const remote = git(
+      '-c',
+      'credential.helper=!gh auth git-credential',
+      'ls-remote',
+      'https://github.com/cfgate/cfgate.io.git',
+      'refs/heads/main'
+    ).split(/\s/)[0]
+    if (head !== remote) throw new Error('Sync local main before activation')
+    await provisionCloudflare(api, store, false)
+    const token = store.values.CLOUDFLARE_API_TOKEN
+    if (!token) throw new Error('Encrypted CLOUDFLARE_API_TOKEN is required for deployment')
+    const secrets = {
+      DOCS_ACCOUNT_ID: deployment.accountId,
+      DOCS_DEPLOY_TOKEN: store.values.DOCS_DEPLOY_TOKEN || token,
+      DOCS_BUILD_HOOK: z.string().min(1).parse(store.values.DOCS_BUILD_HOOK),
+      DOCS_ADMIN_TOKEN: store.values.DOCS_ADMIN_TOKEN,
+      DOCS_BUILDER_TOKEN: store.values.DOCS_BUILDER_TOKEN,
+      GITHUB_WEBHOOK_SECRET: store.values.GITHUB_WEBHOOK_SECRET,
+      GITHUB_READ_TOKEN: store.values.GITHUB_READ_TOKEN || '',
+    }
+    await cloudflareAPI(secrets.DOCS_DEPLOY_TOKEN)(
+      `workers/scripts/${deployment.worker}/deployments`
+    )
+    const expectedDigest = await activationDigest(secrets)
+    const request = (path: string) =>
+      fetch(`${origin}/internal/docs/${path}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${secrets.DOCS_ADMIN_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
+      })
+    await activate({
+      async status() {
+        return activationStatus(
+          await request('status'),
+          expectedDigest,
+          args.includes('--install'),
+          async () =>
+            z
+              .array(z.object({ name: z.string() }))
+              .parse(await api(`workers/scripts/${deployment.worker}/secrets`))
+              .map((s) => s.name)
         )
-    },
-    async configureBuild() {
-      await api(`builds/triggers/${env.DOCS_TRIGGER_ID}`, {
-        build_command: 'pnpm build',
-        deploy_command: 'pnpm run deploy',
-      })
-      await api(`builds/triggers/${env.DOCS_TRIGGER_ID}/environment_variables`, {
-        DOCS_BUILDER_TOKEN: { value: stored.DOCS_BUILDER_TOKEN, is_secret: true },
-      })
-    },
-  })
-  console.log(
-    'Activation confirmed. Production build settings are configured; previews were not changed. Resume production builds.'
-  )
+      },
+      async deploy() {
+        // Supplying secrets to this subprocess does not install setup or GitHub administrator tokens in the Worker.
+        const env = {
+          ...process.env,
+          CLOUDFLARE_ACCOUNT_ID: deployment.accountId,
+          CLOUDFLARE_API_TOKEN: token,
+        }
+        execFileSync('pnpm', ['run', 'build'], { stdio: 'inherit', env })
+        execFileSync('pnpm', ['test'], { stdio: 'inherit', env })
+        const temporary = await mkdtemp(join(tmpdir(), 'cfgate-deploy-'))
+        try {
+          const path = resolve(temporary, 'secrets.json')
+          await writeFile(path, JSON.stringify(secrets), { mode: 0o600, flag: 'wx' })
+          execFileSync('pnpm', ['exec', 'wrangler', 'deploy', '--secrets-file', path], {
+            stdio: 'inherit',
+            env,
+          })
+        } finally {
+          await rm(temporary, { recursive: true, force: true })
+        }
+      },
+      async bootstrap() {
+        const response = await request('bootstrap')
+        if (!response.ok)
+          throw new Error(
+            `Bootstrap returned ${response.status}; preserve encrypted credentials and investigate`
+          )
+      },
+      async configureBuild() {
+        await api(`builds/triggers/${store.values.DOCS_TRIGGER_ID}`, 'PATCH', {
+          build_command: 'pnpm build',
+          deploy_command: 'pnpm run deploy',
+        })
+        await api(
+          `builds/triggers/${store.values.DOCS_TRIGGER_ID}/environment_variables`,
+          'PATCH',
+          {
+            DOCS_BUILDER_TOKEN: { value: secrets.DOCS_BUILDER_TOKEN, is_secret: true },
+          }
+        )
+      },
+    })
+    await provisionGithub(githubAPI, store, true)
+    console.log(
+      'Activation confirmed and release webhooks enabled. Production build settings are ready.'
+    )
+  } finally {
+    await rm(lock, { force: true })
+  }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch((error: unknown) => {
     console.error(
       error instanceof z.ZodError
-        ? 'Invalid setup configuration; check required environment values'
+        ? 'Invalid configuration; check setup inputs without logging secret values'
         : error instanceof Error
           ? error.message
           : 'Setup failed'

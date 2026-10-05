@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "accountId": "6aa0d0c55c5836c65dbee4ba33ae5f19",
+  "worker": "cfgate-service-worker",
+  "repository": "cfgate/cfgate.io",
+  "branch": "main",
+  "deployHookName": "cfgate.io-docs",
+  "webhookURL": "https://cfgate.io/api/hooks/github",
+  "webhookRepositories": ["cfgate/cfgate", "cfgate/helm-chart"]
+}

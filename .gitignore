@@ -739,5 +739,5 @@ docs/src/content/docs/
 docs/public/
 docs/.astro/
 
-# Local activation credentials and interrupted deployment receipts
+# Local setup lock and legacy activation credentials
 .activation/
