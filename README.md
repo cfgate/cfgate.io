@@ -60,7 +60,7 @@ The Durable Object owns project observations and build coordination. Pages initi
 
 Access checks use a 30-minute threshold. An hourly schedule and signed GitHub release webhooks provide independent triggers. Changed normalized inputs request a Cloudflare Workers Build; unchanged observations do not. A successful compilation is uploaded as a candidate and published only if its release, renderer, generation and lease remain eligible.
 
-The served documentation version comes from the deployed manifest, never from the newest observed release. Failed or superseded builds leave the previous edition online. Run `pnpm setup` to inspect the one-time activation plan. [Operations](docs/operations.md) describes credentials, `pnpm setup --apply`, production build settings and recovery. Setup is a local administrative operation; routine publication uses `pnpm deploy` inside Workers Builds. Pull requests and GitHub Actions do not publish production.
+The served documentation version comes from the deployed manifest, never from the newest observed release. Failed or superseded builds leave the previous edition online. Run `pnpm run setup` to inspect the one-time activation plan. [Operations](docs/operations.md) describes credentials, `pnpm run setup --apply`, production build settings and recovery. Setup is a local administrative operation; routine publication uses `pnpm run deploy` inside Workers Builds. Pull requests and GitHub Actions do not publish production.
 
 When the coordinator binding is absent, previews retain the legacy project-data cache and dated snapshot fallback. The browser revalidates the API on each visit; its per-location Worker cache lasts 30 minutes. This fallback cache is not publication authority.
 
