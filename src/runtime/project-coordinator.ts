@@ -52,7 +52,13 @@ export class ProjectCoordinator extends DurableObject<Bindings> {
       if (path === '/status') {
         const state = await this.coordinator.state()
         return Response.json(
-          { initialized: state.initialized, configurationDigest: await activationDigest(this.env) },
+          {
+            initialized: state.initialized,
+            phase: state.phase,
+            lastError: state.lastError,
+            nextCheckAt: state.nextCheckAt,
+            configurationDigest: await activationDigest(this.env),
+          },
           { headers: { 'Cache-Control': 'no-store' } }
         )
       }

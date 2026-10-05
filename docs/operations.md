@@ -109,6 +109,8 @@ No product-repository documentation workflow is needed. Do not replace the produ
 
 Read the published source identity at `/docs/manifest.json`. `/api/project` reports mutable observed/desired versions alongside the served version read from the current deployment's assets. A newer observed release does not relabel older HTML.
 
+For authenticated diagnostics, POST `{}` to `/internal/docs/status` using the admin token. It reports initialization, phase, the last reconciliation error and the next check time without returning credentials.
+
 For a source check:
 
 ```sh
