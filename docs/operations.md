@@ -95,7 +95,7 @@ The `cfgate/cfgate` repository uses an Actions secret named `MISE_SOPS_AGE_KEY` 
 
 ## GitHub notifications
 
-Setup subscribes both product repositories to release events at `https://cfgate.io/api/hooks/github`, using JSON, TLS verification and the generated signing secret. Hooks stay inactive until the receiving Worker is initialized. Optional workflow-run notifications can be configured separately for CI freshness, but setup's managed configuration is release-only.
+Setup subscribes both product repositories to release events at `https://cfgate.io/api/hooks/github`, using JSON, TLS verification and the generated signing secret. Hooks stay inactive until the receiving Worker is initialized. New hooks subscribe only to releases. For existing hooks, setup adds release notifications without replacing other subscriptions, including optional workflow-run notifications for CI freshness.
 
 A product release sends a signed notification to the website Worker. The Worker validates the raw body, repository, event/action and delivery ID, then asks the Durable Object to persist a reconciliation request. The coordinator rechecks GitHub rather than trusting the notification's version. When pinned inputs change, it calls the Cloudflare deploy hook. Workers Builds claims a plan, builds and uploads a candidate, and asks the coordinator to publish it. GitHub does not send Markdown to the object or deploy the website directly.
 

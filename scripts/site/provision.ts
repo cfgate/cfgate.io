@@ -178,7 +178,13 @@ export async function provisionGithub(
     }
     if (matching.length) {
       // Staging must not rotate the secret or disable a working hook.
-      if (active) await api(`${repo}/hooks/${matching[0].id}`, 'PATCH', body)
+      if (active)
+        await api(`${repo}/hooks/${matching[0].id}`, 'PATCH', {
+          active: true,
+          config: body.config,
+          // Add on the server instead of replacing a possibly stale event inventory.
+          add_events: ['release'],
+        })
     } else {
       await api(`${repo}/hooks`, 'POST', body)
     }
