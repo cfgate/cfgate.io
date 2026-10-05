@@ -97,7 +97,7 @@ export async function activate(steps: ActivationSteps): Promise<void> {
 
 async function main() {
   const args = process.argv.slice(2)
-  if (args.some((arg) => arg !== '--apply')) throw new Error('Usage: pnpm setup [--apply]')
+  if (args.some((arg) => arg !== '--apply')) throw new Error('Usage: pnpm run setup [--apply]')
   if (!args.includes('--apply')) {
     console.log(`One-time activation plan (no writes):
 1. Validate a clean production checkout and Cloudflare production trigger.
@@ -253,7 +253,7 @@ Keep .activation/ backed up securely. See docs/operations.md for permissions and
     async configureBuild() {
       await api(`builds/triggers/${env.DOCS_TRIGGER_ID}`, {
         build_command: 'pnpm build',
-        deploy_command: 'pnpm deploy',
+        deploy_command: 'pnpm run deploy',
       })
       await api(`builds/triggers/${env.DOCS_TRIGGER_ID}/environment_variables`, {
         DOCS_BUILDER_TOKEN: { value: stored.DOCS_BUILDER_TOKEN, is_secret: true },

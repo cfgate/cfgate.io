@@ -35,15 +35,15 @@ Cloudflare's Builds API requires a user-scoped token; an account-scoped token ca
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm setup             # Print the plan; no writes or credentials required
-pnpm setup --apply     # Apply from clean, current main with the variables above
+pnpm run setup             # Print the plan; no writes or credentials required
+pnpm run setup --apply     # Apply from clean, current main with the variables above
 ```
 
-With Mise-managed secrets, run `mise run pnpm setup --apply` instead. Setup generates separate builder/admin tokens once and retains them in `.activation/credentials.json` with owner-only access. The directory is ignored by Git. Back it up in your secret manager; it contains plaintext credentials, not encrypted SOPS data. Reuse it on retries, and restore it when moving setup to another host. Do not delete it to fix an authentication failure.
+With Mise-managed secrets, run `mise run pnpm run setup --apply` instead. Setup generates separate builder/admin tokens once and retains them in `.activation/credentials.json` with owner-only access. The directory is ignored by Git. Back it up in your secret manager; it contains plaintext credentials, not encrypted SOPS data. Reuse it on retries, and restore it when moving setup to another host. Do not delete it to fix an authentication failure.
 
 The command validates the account, Worker and production trigger. If the coordinator is absent and the site has no documentation manifest, it builds and tests the site, then deploys the Worker, assets, migration and runtime secrets together using `wrangler deploy --secrets-file`. If that deployment already completed, a retry observes its status and continues without deploying again. An authenticated bootstrap request reads the Worker's own manifest and verifies its active Cloudflare version before recording publication state.
 
-After initialization is confirmed, setup configures `pnpm build` and `pnpm deploy` on the production trigger and installs the matching `DOCS_BUILDER_TOKEN` as a build secret. It leaves preview settings unchanged. Resume automatic builds after setup succeeds; preview deployments should continue using `npx wrangler preview`.
+After initialization is confirmed, setup configures `pnpm build` and `pnpm run deploy` on the production trigger and installs the matching `DOCS_BUILDER_TOKEN` as a build secret. It leaves preview settings unchanged. Resume automatic builds after setup succeeds; preview deployments should continue using `npx wrangler preview`.
 
 These steps are resumable, not a transaction across Cloudflare services. Failed configuration can leave partial setup that needs a retry with the same credentials. An initialized coordinator is never reset, and setup does not redeploy the original edition over newer documentation. Setup is not a general secret-rotation or migration tool. Authentication failures, unknown deployment state and conflicting bootstrap requests stop it for investigation.
 
