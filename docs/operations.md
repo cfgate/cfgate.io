@@ -12,75 +12,94 @@ Routine deployments upload candidates, then ask the coordinator to publish eligi
 
 Build environment variables and runtime bindings are separate. Wrangler `[vars]` does not export arbitrary values into the shell running `pnpm build`. `.node-version` and `package.json`'s `packageManager` pin select tools; they are not secret provisioning mechanisms. Ordinary build configuration belongs in repository code. Secrets belong in the relevant Cloudflare settings.
 
+## Repository configuration
+
+`deployment.json` records the account, Worker, repository, production branch and webhook destinations. These identifiers are public. `secrets.enc.yaml` records credentials and the secret deploy-hook URL, encrypted with SOPS. `.sops.yaml` contains the existing public age recipients; their private keys stay with authorized operators.
+
+This is the repository's desired activation configuration. It is not a backup of the Durable Object's live observations, leases or publication history. Committing credentials does not install them, and checking out an older encrypted file does not roll back Cloudflare. Setup checks the runtime configuration digest before changing build settings or enabling webhooks. A mismatch stops for investigation rather than rotating secrets implicitly.
+
+### Required permissions
+
+Only the Builds setup token needs to be created separately for this installation. Create a **user API token** under [My Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens), using a custom template:
+
+- Name: `cfgate.io-builds-setup`.
+- Account permissions: **Workers Builds Configuration: Edit** and **Workers Scripts: Read**.
+- Account resources: include only the account recorded in `deployment.json`.
+
+Store it as `CLOUDFLARE_SETUP_TOKEN` using `sops secrets.enc.yaml`. Do not put the token in `deployment.json`, shell history or a pull-request description. Cloudflare's Builds API requires a user-scoped token; the existing account-owned deployment token cannot replace it. The API calls this Builds permission `Workers CI Write`; see the [Builds API reference](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/).
+
+The existing encrypted `CLOUDFLARE_API_TOKEN` remains the Wrangler deployment credential. It needs Workers Scripts edit access and the permissions required to deploy this Worker's existing routes. Setup uses it for runtime candidate publication too, unless `DOCS_DEPLOY_TOKEN` supplies a separate account-scoped Workers Scripts read/write token. Setup can test read access before installation; that check does not prove write access.
+
+GitHub setup uses the local `gh` login. It needs **Webhooks: write** on `cfgate/cfgate` and `cfgate/helm-chart`, or the classic `admin:repo_hook` scope. An authorized login with that scope needs no new GitHub token. Setup never copies this administrator credential into the Worker or build environment. Cloudflare's GitHub App connection remains a separate authorization: it must already connect this Worker to `cfgate/cfgate.io` with `main` as its production branch.
+
 ## First deployment
 
-The local setup command configures an existing website Worker and its existing production Git connection. It does not create the Cloudflare GitHub App authorization, generate a Cloudflare API token, create a deploy hook or configure GitHub webhooks.
-
-Before applying setup:
-
-1. Pause automatic production builds and wait for active builds to finish. Keep the current deployment online throughout preparation.
-2. Merge the reviewed setup code, then sync a clean local `main`. Review the released operator and chart pins in `docs/bootstrap.json`.
-3. Create a deploy hook for this Worker's `main` branch under **Settings > Builds > Deploy Hooks**.
-4. Supply the environment below through your local secret manager. This repository's `mise.toml` can load `secrets.enc.yaml`; a local SOPS key decrypts that file. Do not transfer the age key into Workers Builds just to configure the builder token.
-
-| Local variable          | Purpose                                                                                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_ACCOUNT_ID` | Account containing `cfgate-service-worker`; an identifier, not a secret                                                                                             |
-| `CLOUDFLARE_API_TOKEN`  | User-scoped setup token with Workers Builds Configuration Edit, Workers Scripts Edit and the permissions needed by Wrangler for this Worker's routes and deployment |
-| `DOCS_TRIGGER_ID`       | UUID of this Worker's production build trigger, selecting only `main`                                                                                               |
-| `DOCS_BUILD_HOOK`       | Secret URL of the `main` deploy hook                                                                                                                                |
-| `DOCS_DEPLOY_TOKEN`     | Separate runtime token with Workers Scripts read/write in this account; used for candidate verification and publication                                             |
-
-Cloudflare's Builds API requires a user-scoped token; an account-scoped token can fail even when Worker deployment works. The setup token and the build system's own upload token have different roles. See the [Builds API reference](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/) for trigger IDs and permissions.
+Preparation can run on the reviewed development branch. It does not deploy the site:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm run setup             # Print the plan; no writes or credentials required
-pnpm run setup --apply --install  # First installation from clean, current main
-pnpm run setup --apply            # Resume after the new Worker is installed
+pnpm run setup                # Print the plan without writes
+pnpm run setup --prepare      # Generate missing application secrets in SOPS
+pnpm run setup --provision    # Record Cloudflare identities; stage inactive webhooks
 ```
 
-With Mise-managed secrets, run `mise run pnpm run setup --apply --install` instead. Setup generates separate builder/admin tokens once and retains them in `.activation/credentials.json` with owner-only access. The directory is ignored by Git. Back it up in your secret manager; it contains plaintext credentials, not encrypted SOPS data. Reuse it on retries, and restore it when moving setup to another host. Do not delete it to fix an authentication failure.
+With the repository's Mise task, prefix commands with `mise run`, for example `mise run pnpm run setup --prepare`. Setup reads the encrypted file directly through SOPS, so a value updated in the file is not shadowed by an older environment variable. No private age key is sent to GitHub Actions or Workers Builds.
 
-The command validates the account, Worker, production trigger and deploy hook, and checks the runtime publication token can read deployments. The first installation needs explicit `--install` because an older Worker can return either 404 or 401 for the new status endpoint. Before installing, setup checks Cloudflare secret metadata and refuses to replace an existing admin or builder credential. It then builds and tests the site and deploys the Worker, assets, migration and runtime secrets together using `wrangler deploy --secrets-file`. If that deployment already completed, a retry observes its status and continues without deploying again. If propagation still exposes the old endpoint but Cloudflare reports installed credentials, setup stops instead of deploying again. Wait and retry with the same local credentials. An older docs-enabled deployment with existing credentials requires a reviewed maintenance upgrade; `--install` is not an override for that case. An authenticated bootstrap request reads the Worker's own manifest and verifies its active Cloudflare version before recording publication state.
+`--prepare` generates independent admin, builder and webhook-signing secrets. Existing values are preserved. If `.activation/credentials.json` exists from the earlier setup implementation, matching-account credentials are imported; conflicting values stop the operation. After verifying the encrypted copy, remove or securely archive that old plaintext file. New setup runs do not create it.
 
-Before initialization enables scheduled or access-triggered builds, setup configures `pnpm build` and `pnpm run deploy` on the production trigger and installs the matching `DOCS_BUILDER_TOKEN` as a build secret. It then confirms coordinator initialization and leaves preview settings unchanged. Resume automatic builds after setup succeeds; preview deployments should continue using `npx wrangler preview`.
+`--provision` discovers the single main-only build trigger belonging to the configured Worker and repository. It creates or reuses the named main deploy hook, then records its URL and trigger identity in SOPS. A later run validates those recorded identities. It also creates inactive, release-only GitHub webhooks for both product repositories. Existing hooks at the configured URL are left unchanged during preparation. Cloudflare and GitHub steps can succeed independently; if one fails, fix its access and retry with the same file. A lost creation response can be recovered by discovering the named hook on the next run.
 
-These steps are resumable, not a transaction across Cloudflare services. Failed configuration can leave partial setup that needs a retry with the same credentials. An initialized coordinator is never reset, and setup does not redeploy the original edition over newer documentation. Setup is not a general secret-rotation or migration tool. Authentication failures, unknown deployment state and conflicting bootstrap requests stop it for investigation.
+Review and commit `deployment.json`, `.sops.yaml` and the encrypted file with the implementation. Before merging and activating:
 
-If the process is forcibly terminated during deployment, a private temporary secrets file can remain under `.activation/deploy-*`. Remove that temporary directory after recovery; preserve `credentials.json`. Do not run setup concurrently or resume automatic builds during activation.
+1. Hold automatic production builds and wait for active production builds to finish. If the dashboard does not offer a pause control, temporarily set the production build command to `exit 1`; leave the Git connection and preview settings intact. Setup restores the production commands. This stops new production work without removing the live deployment.
+2. Merge the reviewed PR, then sync a clean local `main`.
+3. Review the operator and chart pins in `docs/bootstrap.json`, then run:
+
+```sh
+mise run pnpm run setup --apply --install
+```
+
+Use `--apply` alone when resuming after installation. The first installation needs explicit `--install` because the older Worker may return 404 or 401 for the status endpoint. Setup checks Cloudflare secret metadata and refuses to replace an existing admin or builder credential. An authentication failure is not permission to overwrite credentials.
+
+Setup builds and tests the site, then deploys the Worker, static assets, Durable Object migration and runtime secrets together with `wrangler deploy --secrets-file`. It verifies the installed configuration, configures `pnpm build` and `pnpm run deploy` on the production trigger, and installs its matching builder token. Only then does it initialize the coordinator from the deployed manifest and enable the signed GitHub webhooks. Preview commands and unrelated build variables remain unchanged.
+
+If installation already completed, setup verifies its state and resumes without redeploying the initial edition. If propagation still exposes the old endpoint while Cloudflare reports installed credentials, wait and retry with the same encrypted values. An older docs-enabled deployment or a deliberate secret rotation requires a reviewed maintenance procedure; `--install` does not bypass existing authentication.
+
+After success, restore any separate dashboard pause control and check `/docs/manifest.json`, `/api/project` and the next production build. Production builds can now claim plans and publish eligible candidates. The setup command does not need to run before each deployment.
+
+### Partial failure and local files
+
+These steps are resumable, not atomic across Cloudflare and GitHub. A failure can leave an installed Worker, configured build trigger or one enabled webhook. Retry with the same encrypted configuration. An initialized coordinator is never reset, and setup does not replace newer documentation with bootstrap content.
+
+A local `.activation/setup.lock` prevents concurrent setup commands. After a hard termination, confirm that no setup process is running before removing the stale lock. A hard termination during deployment can leave a private `cfgate-deploy-*` directory in the operating system's temporary directory. Remove that directory after confirming it is no longer in use. Its secrets file is plaintext; ordinary completion removes it. Repository updates use ciphertext-only temporary files and refuse observed concurrent edits. Do not edit secrets while setup is running.
 
 ## Credential placement
 
-| Variable                | Installed in                                                       | Purpose                                                       |
-| ----------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------- |
-| `DOCS_BUILDER_TOKEN`    | Worker and production Workers Builds trigger, by setup             | Claims, candidates and failure reports                        |
-| `DOCS_ADMIN_TOKEN`      | Worker and local credential store, by setup                        | Initialization, status and manual reconciliation              |
-| `DOCS_ACCOUNT_ID`       | Worker, by setup                                                   | Account identifier for publication API calls                  |
-| `DOCS_DEPLOY_TOKEN`     | Worker, by setup                                                   | Verify and publish candidates                                 |
-| `DOCS_BUILD_HOOK`       | Worker, by setup                                                   | Request a production build                                    |
-| `GITHUB_READ_TOKEN`     | Optional Worker secret; forwarded if supplied during initial setup | Read-only metadata access                                     |
-| `GITHUB_TOKEN`          | Optional build variable, configured separately                     | Read-only pinned source retrieval                             |
-| `GITHUB_WEBHOOK_SECRET` | Worker and repository webhook settings                             | HMAC verification; forwarded if supplied during initial setup |
+| Value                    | Source and destination                                     | Purpose                                          |
+| ------------------------ | ---------------------------------------------------------- | ------------------------------------------------ |
+| `CLOUDFLARE_SETUP_TOKEN` | SOPS; local setup only                                     | Discover and configure Builds                    |
+| `CLOUDFLARE_API_TOKEN`   | SOPS; local Wrangler deployment                            | Install code, assets and runtime settings        |
+| `DOCS_TRIGGER_ID`        | Discovered; SOPS                                           | Select the production build trigger              |
+| `DOCS_BUILDER_TOKEN`     | Generated; SOPS, Worker and production build secret        | Claims, candidates and failure reports           |
+| `DOCS_ADMIN_TOKEN`       | Generated; SOPS and Worker                                 | Initialization, status and manual reconciliation |
+| `DOCS_ACCOUNT_ID`        | Derived from `deployment.json`; Worker                     | Publication API account                          |
+| `DOCS_DEPLOY_TOKEN`      | Optional SOPS override, otherwise deployment token; Worker | Verify and publish candidates                    |
+| `DOCS_BUILD_HOOK`        | Created/discovered; SOPS and Worker                        | Request a production build                       |
+| `GITHUB_WEBHOOK_SECRET`  | Generated; SOPS, Worker and two repository hooks           | Authenticate release notifications               |
+| `GITHUB_READ_TOKEN`      | Optional read-only SOPS value; Worker                      | Raise GitHub metadata request limits             |
+| `GITHUB_TOKEN`           | Optional read-only build variable, configured separately   | Read pinned sources during a build               |
 
-The Worker's **Settings > Variables and Secrets** holds runtime credentials. **Settings > Builds > Variables and Secrets** holds build credentials. Setup uses the Builds API to install the shared builder value; there is no need to copy it manually. Existing unrelated build variables are preserved.
+The Worker's **Settings > Variables and Secrets** holds runtime credentials. **Settings > Builds > Variables and Secrets** holds build credentials. Setup installs the builder value in both places; no manual copy is needed. Workers Builds retains its normal Cloudflare upload credential independently of these application secrets.
 
-The `cfgate/cfgate` operator repository uses an Actions secret named `MISE_SOPS_AGE_KEY` for release/E2E decryption. That secret is not automatically shared with this repository or Cloudflare. This website's Actions workflow uses GitHub's automatic token for source reads and performs no SOPS decryption or production publication.
-
-Preview builds must not receive production publication credentials. Their Wrangler configuration removes the coordinator binding and uses `ENVIRONMENT=staging`; mutation endpoints also require the production hostname. Workers Builds retains its normal Cloudflare upload credential independently of application authentication.
+The `cfgate/cfgate` repository uses an Actions secret named `MISE_SOPS_AGE_KEY` for operator release/E2E decryption. It is not shared automatically with this repository or Cloudflare. Website Actions use GitHub's automatic read token for validation, with no SOPS decryption or production publication. Preview builds receive no production publication credentials; their Wrangler configuration removes the coordinator binding and sets `ENVIRONMENT=staging`. Mutation endpoints also require the production hostname.
 
 ## GitHub notifications
 
-Create repository webhooks on `cfgate/cfgate` and `cfgate/helm-chart` with:
+Setup subscribes both product repositories to release events at `https://cfgate.io/api/hooks/github`, using JSON, TLS verification and the generated signing secret. Hooks stay inactive until the receiving Worker is initialized. Optional workflow-run notifications can be configured separately for CI freshness, but setup's managed configuration is release-only.
 
-- payload URL `https://cfgate.io/api/hooks/github`
-- content type `application/json`
-- the shared `GITHUB_WEBHOOK_SECRET`
-- release events; optionally workflow-run completion events for project CI information
+A product release sends a signed notification to the website Worker. The Worker validates the raw body, repository, event/action and delivery ID, then asks the Durable Object to persist a reconciliation request. The coordinator rechecks GitHub rather than trusting the notification's version. When pinned inputs change, it calls the Cloudflare deploy hook. Workers Builds claims a plan, builds and uploads a candidate, and asks the coordinator to publish it. GitHub does not send Markdown to the object or deploy the website directly.
 
-Do not subscribe to every event. Product pushes are ignored while `next` is disabled. The handler verifies the original UTF-8 request body, expected repository, event/action and delivery ID, persists a bounded receipt, then returns 202. Duplicate and out-of-order events request authoritative observation; they never directly select a deployment.
-
-The 64 KiB webhook body limit is intentional. Oversized events are rejected; the hourly schedule still discovers releases. Review GitHub delivery results when diagnosing missed notifications.
+Duplicate and out-of-order events do not select a deployment. Product pushes are ignored while `next` is disabled. The handler returns 202 after durable acceptance; its 64 KiB body limit rejects oversized events. The hourly schedule and access-triggered stale checks remain recovery paths for missed notifications. Check repository webhook delivery results when diagnosing delays.
 
 ## Routine builds
 

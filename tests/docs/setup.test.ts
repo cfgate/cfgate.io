@@ -1,15 +1,6 @@
-import { mkdtemp, rm, chmod, readFile, symlink } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  activate,
-  credentials,
-  productionTrigger,
-  activationStatus,
-  validateHook,
-} from '../../scripts/site/setup'
+import { activate, activationStatus } from '../../scripts/site/setup'
+import { productionTrigger } from '../../scripts/site/provision'
 
 const id = '11111111-1111-4111-8111-111111111111'
 describe('local activation', () => {
@@ -33,7 +24,7 @@ describe('local activation', () => {
   it('rejects stale credentials and tolerates an authenticated completed installation', async () => {
     const body = {
       initialized: true,
-      builderTokenDigest: createHash('sha256').update('builder').digest('hex'),
+      configurationDigest: 'builder',
     }
     expect(
       await activationStatus(Response.json(body), 'builder', false, async () => [])
@@ -41,37 +32,6 @@ describe('local activation', () => {
     await expect(
       activationStatus(Response.json(body), 'different', false, async () => [])
     ).rejects.toThrow('differs')
-  })
-  it('checks hook identity and main branch without triggering a build', () => {
-    const hook = { deploy_hook_uuid: id, external_script_id: 'worker', branch: 'main' }
-    expect(() => validateHook(hook, 'worker', id)).not.toThrow()
-    expect(() => validateHook({ ...hook, branch: 'dev' }, 'worker', id)).toThrow()
-    expect(() => validateHook(hook, 'other-worker', id)).toThrow()
-    expect(() => validateHook(hook, 'worker', '22222222-2222-4222-8222-222222222222')).toThrow()
-  })
-
-  it('retains private credentials across retries and refuses another account', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'cfgate-activation-'))
-    try {
-      const first = await credentials(directory, 'a'.repeat(32))
-      expect(await credentials(directory, 'a'.repeat(32))).toEqual(first)
-      expect(first.DOCS_BUILDER_TOKEN).not.toBe(first.DOCS_ADMIN_TOKEN)
-      await expect(credentials(directory, 'b'.repeat(32))).rejects.toThrow('another account')
-      expect(JSON.parse(await readFile(`${directory}/credentials.json`, 'utf8'))).toEqual(first)
-      await chmod(`${directory}/credentials.json`, 0o644)
-      await expect(credentials(directory, 'a'.repeat(32))).rejects.toThrow('private regular file')
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
-  it('does not follow an activation directory symlink', async () => {
-    const parent = await mkdtemp(join(tmpdir(), 'cfgate-activation-'))
-    try {
-      await symlink(parent, `${parent}/alias`)
-      await expect(credentials(`${parent}/alias`, 'a'.repeat(32))).rejects.toThrow('not a symlink')
-    } finally {
-      await rm(parent, { recursive: true, force: true })
-    }
   })
   it('rejects preview, mixed-branch and unrelated triggers', () => {
     const trigger = {

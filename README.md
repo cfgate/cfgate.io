@@ -38,19 +38,20 @@ Worker tests run in the local Cloudflare runtime. Node tests cover source select
 
 ## Application structure
 
-| Location                                     | Responsibility                                                     |
-| -------------------------------------------- | ------------------------------------------------------------------ |
-| `src/pages`, `src/components`, `src/content` | Marketing pages, project views and localized copy                  |
-| `src/styles/tokens.css`                      | Shared colors, type, spacing, sizing and interaction roles         |
-| `src/styles/global.css`                      | Homepage and project-page compositions                             |
-| `src/index.ts`, `src/handlers`               | Worker routing, APIs, assets and proxies                           |
-| `src/docs`                                   | Validated source contracts, release policy and GitHub reads        |
-| `src/runtime`                                | Durable coordination and guarded Cloudflare publication            |
-| `scripts/docs`                               | Pinned-source preparation and reference generation                 |
-| `scripts/site`                               | Whole-site build, assembly, validation, activation and publication |
-| `docs/astro.config.ts`, `docs/integration`   | Isolated Starlight renderer and cfgate integration                 |
-| `docs/bootstrap.json`                        | Explicit local/initial source pins                                 |
-| `src/data/project.json`                      | Dated project-data fallback                                        |
+| Location                                            | Responsibility                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------- |
+| `src/pages`, `src/components`, `src/content`        | Marketing pages, project views and localized copy                    |
+| `src/styles/tokens.css`                             | Shared colors, type, spacing, sizing and interaction roles           |
+| `src/styles/global.css`                             | Homepage and project-page compositions                               |
+| `src/index.ts`, `src/handlers`                      | Worker routing, APIs, assets and proxies                             |
+| `src/docs`                                          | Validated source contracts, release policy and GitHub reads          |
+| `src/runtime`                                       | Durable coordination and guarded Cloudflare publication              |
+| `scripts/docs`                                      | Pinned-source preparation and reference generation                   |
+| `scripts/site`                                      | Whole-site build, assembly, validation, activation and publication   |
+| `docs/astro.config.ts`, `docs/integration`          | Isolated Starlight renderer and cfgate integration                   |
+| `deployment.json`, `.sops.yaml`, `secrets.enc.yaml` | Account and activation configuration; credentials encrypted with age |
+| `docs/bootstrap.json`                               | Explicit local/initial source pins                                   |
+| `src/data/project.json`                             | Dated project-data fallback                                          |
 
 The marketing homepage stays at `/`. Documentation lives at `/docs/`; no `/docs/next/` or historical edition is published initially. Source links identify the actual release commit. Generated references identify their schema or chart source.
 
@@ -60,7 +61,7 @@ The Durable Object owns project observations and build coordination. Pages initi
 
 Access checks use a 30-minute threshold. An hourly schedule and signed GitHub release webhooks provide independent triggers. Changed normalized inputs request a Cloudflare Workers Build; unchanged observations do not. A successful compilation is uploaded as a candidate and published only if its release, renderer, generation and lease remain eligible.
 
-The served documentation version comes from the deployed manifest, never from the newest observed release. Failed or superseded builds leave the previous edition online. Run `pnpm run setup` to inspect the one-time activation plan. [Operations](docs/operations.md) describes credentials, `pnpm run setup --apply`, production build settings and recovery. Setup is a local administrative operation; routine publication uses `pnpm run deploy` inside Workers Builds. Pull requests and GitHub Actions do not publish production.
+The served documentation version comes from the deployed manifest, never from the newest observed release. Failed or superseded builds leave the previous edition online. Run `pnpm run setup` to inspect the one-time activation plan. [Operations](docs/operations.md) describes token permissions, encrypted preparation with `--prepare`, hook provisioning with `--provision`, and activation with `--apply --install` after merging. The repository preserves desired setup configuration; the Durable Object retains live publication state. Setup is a local administrative operation; routine publication uses `pnpm run deploy` inside Workers Builds. Pull requests and GitHub Actions do not publish production.
 
 When the coordinator binding is absent, previews retain the legacy project-data cache and dated snapshot fallback. The browser revalidates the API on each visit; its per-location Worker cache lasts 30 minutes. This fallback cache is not publication authority.
 

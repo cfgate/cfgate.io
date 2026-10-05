@@ -1,3 +1,4 @@
+import { activationDigest } from './activation.js'
 import { DurableObject } from 'cloudflare:workers'
 import { z } from 'zod'
 import type { Bindings } from '../types.js'
@@ -50,15 +51,8 @@ export class ProjectCoordinator extends DurableObject<Bindings> {
         return new Response('Read-only environment', { status: 403 })
       if (path === '/status') {
         const state = await this.coordinator.state()
-        const bytes = await crypto.subtle.digest(
-          'SHA-256',
-          new TextEncoder().encode(this.env.DOCS_BUILDER_TOKEN ?? '')
-        )
-        const builderTokenDigest = Array.from(new Uint8Array(bytes), (b) =>
-          b.toString(16).padStart(2, '0')
-        ).join('')
         return Response.json(
-          { initialized: state.initialized, builderTokenDigest },
+          { initialized: state.initialized, configurationDigest: await activationDigest(this.env) },
           { headers: { 'Cache-Control': 'no-store' } }
         )
       }
