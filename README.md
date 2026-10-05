@@ -6,7 +6,13 @@
 
 cfgate.io serves the project website, released operator documentation, project information, Go vanity imports and Kubernetes release manifests through one Cloudflare Worker.
 
-[Website](https://cfgate.io) · [Released documentation](https://cfgate.io/docs/) · [Architecture](docs/architecture.md) · [Deployment and recovery](docs/operations.md)
+[Website](https://cfgate.io) · [Released documentation](https://cfgate.io/docs/) · [System and workflow diagrams](docs/architecture.md) · [Deployment and maintenance](docs/operations.md)
+
+## Deployment entry points
+
+[Deployment and maintenance](docs/operations.md) is the procedure list for local secret access, Cloudflare/GitHub connection setup, first activation, credential rotation, routine publication and recovery. Start with the [system diagrams](docs/architecture.md#workflow-diagrams) if the service boundaries are unfamiliar.
+
+For an existing installation, normal website changes go through the connected `main` build. First activation requires provider credentials and a held Git connection before merging; setup cannot create or approve those authorizations. GitHub Actions validates changes independently and does not gate production publication.
 
 ## Local development
 
@@ -61,7 +67,7 @@ The Durable Object owns project observations and build coordination. Pages initi
 
 Access checks use a 30-minute threshold. An hourly schedule and signed GitHub release webhooks provide independent triggers. Changed normalized inputs request a Cloudflare Workers Build; unchanged observations do not. A successful compilation is uploaded as a candidate and published only if its release, renderer, generation and lease remain eligible.
 
-The served documentation version comes from the deployed manifest, never from the newest observed release. Failed or superseded builds leave the previous edition online. Run `pnpm run setup` to inspect the one-time activation plan. [Operations](docs/operations.md) describes token permissions, encrypted preparation with `--prepare`, hook provisioning with `--provision`, and activation with `--apply --install` after merging. The repository preserves desired setup configuration; the Durable Object retains live publication state. Setup is a local administrative operation; routine publication uses `pnpm run deploy` inside Workers Builds. Pull requests and GitHub Actions do not publish production.
+The served documentation version comes from the deployed manifest, never from the newest observed release. Failed preparation and superseded candidates retain the previous edition. An uncertain publication requires checking the active deployment; an HTTP error can occur after deployment succeeds. Run `pnpm run setup` to inspect the one-time activation plan. [Operations](docs/operations.md) describes token permissions, encrypted preparation with `--prepare`, hook provisioning with `--provision`, and activation with `--apply --install` after merging. The repository preserves desired setup configuration; the Durable Object retains live publication state. Setup is a local administrative operation; routine publication uses `pnpm run deploy` inside Workers Builds. Pull requests and GitHub Actions do not publish production.
 
 When the coordinator binding is absent, previews retain the legacy project-data cache and dated snapshot fallback. The browser revalidates the API on each visit; its per-location Worker cache lasts 30 minutes. This fallback cache is not publication authority.
 
@@ -91,7 +97,7 @@ Homepage motion pauses offscreen and in hidden tabs and respects reduced-motion 
 
 Renovate proposes dependency updates. CI runs lint, type checks, builds and tests. Trivy checks vulnerabilities and secrets. The narrowly scoped `http-cache-semantics` advisory exception in `.trivyignore.yaml` documents its build-only applicability and expiry; re-evaluate it when that dependency or Astro's image-cache behavior changes.
 
-Keep read-only source credentials, webhook secrets, build authentication and deployment authority separate. Preview builds receive no production publication credentials. Review Cloudflare zone cache rules separately from repository headers when investigating stale responses.
+Keep read-only source credentials, webhook secrets, build authentication and deployment authority separate. Keep production publication credentials out of preview build settings. Review Cloudflare zone cache rules separately from repository headers when investigating stale responses.
 
 ## License
 
