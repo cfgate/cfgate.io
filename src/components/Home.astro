@@ -1,6 +1,7 @@
 ---
 import Base from '@/layouts/Base.astro'
 import Icon from './Icon.astro'
+import Wordmark from './Wordmark.astro'
 import ReleaseStrip from './ReleaseStrip.astro'
 import ConfigurationExample from './ConfigurationExample.astro'
 import WorkflowArt from './WorkflowArt.astro'
@@ -46,9 +47,7 @@ const command =
     {t.skip}
   </a>
   <header class='site-header container'>
-    <a class='wordmark' href={locale === 'en' ? '/' : `/${locale}/`} aria-label={t.home}>
-      <span>cf</span>gate<span class='wordmark-period'>.</span>
-    </a>
+    <Wordmark href={locale === 'en' ? '/' : `/${locale}/`} label={t.home} />
     <nav class='header-nav' aria-label={t.nav}>
       <a class='header-how' href='#how-it-works'>
         {t.how}
@@ -207,9 +206,7 @@ const command =
   </main>
   <footer class='site-footer container'>
     <div>
-      <a class='wordmark' href={locale === 'en' ? '/' : `/${locale}/`} aria-label={t.home}>
-        <span>cf</span>gate<span class='wordmark-period'>.</span>
-      </a>
+      <Wordmark href={locale === 'en' ? '/' : `/${locale}/`} label={t.home} />
       <p>{t.footer}</p>
     </div>
     <div class='footer-meta'>

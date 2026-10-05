@@ -1,0 +1,40 @@
+---
+interface Props {
+  href: string
+  label: string
+}
+
+const { href, label } = Astro.props
+---
+
+<a class='wordmark' href={href} aria-label={label} translate='no'>
+  <span class='wordmark-prefix'>cf</span>gate
+  <span class='wordmark-period' aria-hidden='true'>
+    .
+  </span>
+</a>
+
+<style>
+  .wordmark {
+    display: inline-flex;
+    align-items: baseline;
+    flex-shrink: 0;
+    min-height: var(--wordmark-target, var(--size-control));
+    color: var(--ink);
+    font-family: var(--font-wordmark);
+    font-weight: 700;
+    font-style: italic;
+    font-size: var(--wordmark-size, var(--size-wordmark));
+    line-height: 1;
+    letter-spacing: -0.055em;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .wordmark-prefix,
+  .wordmark-period {
+    color: var(--ink-wordmark-accent);
+  }
+  .wordmark-period {
+    margin-inline-start: calc(var(--space-unit) / 4);
+  }
+</style>

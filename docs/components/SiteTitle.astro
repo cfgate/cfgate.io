@@ -1,0 +1,7 @@
+---
+import Wordmark from '../../src/components/Wordmark.astro'
+
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute
+---
+
+<Wordmark href={siteTitleHref} label={`${siteTitle} documentation`} />

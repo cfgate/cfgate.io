@@ -98,24 +98,6 @@ button:focus-visible {
   align-items: center;
   gap: 40px;
 }
-.wordmark {
-  font-family: var(--brand-font-display);
-  font-weight: 700;
-  font-style: italic;
-  font-size: 40px;
-  line-height: 1;
-  letter-spacing: -0.055em;
-  display: inline-flex;
-  align-items: baseline;
-  min-height: 44px;
-}
-.wordmark > span:first-child {
-  color: var(--accent);
-}
-.wordmark-period {
-  color: var(--accent);
-  margin-left: 1px;
-}
 .header-nav {
   display: flex;
   align-items: center;
@@ -981,8 +963,8 @@ pre {
   gap: 23px;
 }
 .site-footer .wordmark {
-  font-size: 30px;
-  min-height: auto;
+  --wordmark-size: var(--size-wordmark-compact);
+  --wordmark-target: auto;
 }
 .site-footer p {
   color: #96929e;
@@ -1065,8 +1047,8 @@ pre {
     flex-wrap: wrap;
   }
   .wordmark {
-    font-size: 35px;
-    min-height: auto;
+    --wordmark-size: var(--size-wordmark-mobile);
+    --wordmark-target: auto;
   }
   .header-nav {
     gap: calc(var(--space-unit) * 4);
