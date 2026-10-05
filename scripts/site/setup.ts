@@ -73,6 +73,52 @@ export function productionTrigger(input: unknown, workerTag: string, triggerId: 
   return trigger
 }
 
+export function validateHook(input: unknown, workerTag: string, hookId: string): void {
+  const hook = z
+    .object({
+      deploy_hook_uuid: z.uuid(),
+      external_script_id: z.string(),
+      branch: z.string(),
+    })
+    .parse(input)
+  if (
+    hook.deploy_hook_uuid !== hookId ||
+    hook.external_script_id !== workerTag ||
+    hook.branch !== 'main'
+  )
+    throw new Error('Deploy hook must belong to this Worker and target main')
+}
+
+export async function activationStatus(
+  response: Response,
+  builderToken: string,
+  install: boolean,
+  secretNames: () => Promise<string[]>
+): Promise<{ initialized: boolean } | undefined> {
+  if (response.status === 401 || response.status === 404) {
+    if (!install)
+      throw new Error('Status unavailable; first installation requires --apply --install')
+    const installed = await secretNames()
+    if (installed.includes('DOCS_ADMIN_TOKEN') || installed.includes('DOCS_BUILDER_TOKEN'))
+      throw new Error(
+        'Runtime authentication is already configured; restore credentials or investigate propagation instead of reinstalling'
+      )
+    return undefined
+  }
+  if (!response.ok)
+    throw new Error(
+      `Activation status returned ${response.status}; preserve credentials and investigate`
+    )
+  const state = z
+    .object({ initialized: z.boolean(), builderTokenDigest: z.string() })
+    .parse(await response.json())
+  if (state.builderTokenDigest !== createHash('sha256').update(builderToken).digest('hex'))
+    throw new Error(
+      'Stored builder credential differs from the deployed Worker; restore the matching credential'
+    )
+  return state
+}
+
 export interface ActivationSteps {
   status(): Promise<{ initialized: boolean } | undefined>
   deploy(): Promise<void>
@@ -89,23 +135,26 @@ export async function activate(steps: ActivationSteps): Promise<void> {
         'New Worker has not become available; retry setup without changing credentials'
       )
   }
+  // Bootstrap enables alarms and access-triggered builds. Configure their credentials first.
+  await steps.configureBuild()
   if (!state.initialized) await steps.bootstrap()
   if (!(await steps.status())?.initialized)
     throw new Error('Coordinator initialization was not confirmed')
-  await steps.configureBuild()
 }
 
 async function main() {
   const args = process.argv.slice(2)
-  if (args.some((arg) => arg !== '--apply')) throw new Error('Usage: pnpm run setup [--apply]')
+  if (args.some((arg) => !['--apply', '--install'].includes(arg)))
+    throw new Error('Usage: pnpm run setup [--apply [--install]]')
   if (!args.includes('--apply')) {
     console.log(`One-time activation plan (no writes):
 1. Validate a clean production checkout and Cloudflare production trigger.
 2. Retain generated builder/admin credentials in private .activation/credentials.json.
 3. Install the first Worker, assets, migration and runtime secrets together if absent.
-4. Confirm coordinator initialization, then set production build authentication and commands.
+4. Set production build authentication and commands, then initialize the coordinator.
 
-Before --apply, pause automatic production builds and wait for running builds to finish.
+For first installation, use --apply --install. For retries, use --apply.
+Pause automatic production builds and wait for running builds to finish before either.
 Required environment: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN,
 DOCS_TRIGGER_ID, DOCS_BUILD_HOOK and DOCS_DEPLOY_TOKEN.
 Keep .activation/ backed up securely. See docs/operations.md for permissions and recovery.`)
@@ -139,13 +188,13 @@ Keep .activation/ backed up securely. See docs/operations.md for permissions and
     })
     .parse(process.env)
   const account = env.CLOUDFLARE_ACCOUNT_ID
-  async function api(path: string, body?: unknown) {
+  async function api(path: string, body?: unknown, token = env.CLOUDFLARE_API_TOKEN) {
     const response = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${account}/${path}`,
       {
         method: body === undefined ? 'GET' : 'PATCH',
         headers: {
-          Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -171,6 +220,15 @@ Keep .activation/ backed up securely. See docs/operations.md for permissions and
   if (!tag) throw new Error('Existing cfgate-service-worker was not found in this account')
   productionTrigger(await api(`builds/workers/${tag}/triggers`), tag, env.DOCS_TRIGGER_ID)
   await api(`builds/triggers/${env.DOCS_TRIGGER_ID}/environment_variables`)
+  const hookId = z.uuid().parse(new URL(env.DOCS_BUILD_HOOK).pathname.split('/').at(-1))
+  validateHook(await api(`builds/workers/${worker}/deploy_hooks/${hookId}`), tag, hookId)
+  await api(`workers/scripts/${worker}/deployments`, undefined, env.DOCS_DEPLOY_TOKEN)
+  const secretNames = async () =>
+    z
+      .array(z.object({ name: z.string() }))
+      .parse(await api(`workers/scripts/${worker}/secrets`))
+      .map((s) => s.name)
+
   const stored = await credentials('.activation', account)
   async function request(path: string): Promise<Response> {
     return fetch(`${origin}/internal/docs/${path}`, {
@@ -186,34 +244,12 @@ Keep .activation/ backed up securely. See docs/operations.md for permissions and
   }
   await activate({
     async status() {
-      const response = await request('status')
-      if (response.status === 404) {
-        const manifest = await fetch(`${origin}/docs/manifest.json`, {
-          redirect: 'error',
-          signal: AbortSignal.timeout(30000),
-          cache: 'no-store',
-        })
-        if (manifest.status !== 404)
-          throw new Error(
-            'Existing documentation has no activation status endpoint; use a reviewed maintenance deployment'
-          )
-        return undefined
-      }
-      if (!response.ok)
-        throw new Error(
-          `Activation status returned ${response.status}; preserve credentials and investigate`
-        )
-      const state = z
-        .object({ initialized: z.boolean(), builderTokenDigest: z.string() })
-        .parse(await response.json())
-      if (
-        state.builderTokenDigest !==
-        createHash('sha256').update(stored.DOCS_BUILDER_TOKEN).digest('hex')
+      return activationStatus(
+        await request('status'),
+        stored.DOCS_BUILDER_TOKEN,
+        args.includes('--install'),
+        secretNames
       )
-        throw new Error(
-          'Stored builder credential differs from the deployed Worker; restore the matching credential'
-        )
-      return state
     },
     async deploy() {
       console.log('Building and checking the complete site for initial deployment')
