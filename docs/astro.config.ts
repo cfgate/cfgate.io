@@ -23,7 +23,6 @@ export default defineConfig({
     starlight({
       title: 'cfgate',
       description: 'Released cfgate documentation',
-      logo: { src: '../public/favicon.svg', replacesTitle: false },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/cfgate/cfgate' }],
       defaultLocale: 'root',
       locales: { root: { label: 'English', lang: 'en' } },

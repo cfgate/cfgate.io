@@ -17,6 +17,8 @@
   --card-line: #c4c3c9;
   --font-body: var(--brand-font-sans);
   --font-code: var(--brand-font-mono);
+  --font-wordmark: var(--brand-font-display);
+  --ink-wordmark-accent: var(--accent);
   --motion-feedback: 140ms;
   --motion-reveal: 220ms;
   --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -34,6 +36,9 @@
   --space-section: calc(var(--space-content) * 2);
   --size-text: 1rem;
   --size-caption: calc(var(--size-text) * 0.875);
+  --size-wordmark: calc(var(--size-text) * 2.5);
+  --size-wordmark-compact: calc(var(--size-wordmark) * 0.75);
+  --size-wordmark-mobile: calc(var(--size-wordmark) * 0.875);
   --size-control: calc(var(--space-unit) * 11);
   --measure-reading: 48rem;
   --measure-site: 72.5rem;

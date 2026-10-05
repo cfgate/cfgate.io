@@ -16,6 +16,7 @@
   --sl-content-pad-x: var(--space-content);
   --sl-text-body: var(--size-text);
   --sl-text-sm: var(--size-caption);
+  --wordmark-size: var(--size-wordmark-mobile);
 }
 :root[data-theme='light'] {
   --surface: #faf9f7;
@@ -25,6 +26,7 @@
   --line: #dedbd6;
   --accent-ink: color-mix(in oklab, var(--accent), black 45%);
   --accent-soft: color-mix(in oklab, var(--accent) 12%, var(--surface));
+  --ink-wordmark-accent: var(--accent-ink);
   color-scheme: light;
 }
 .edition {

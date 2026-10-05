@@ -30,6 +30,7 @@ export function cfgateDocs(manifest: DocsManifest): StarlightPlugin {
         updateConfig({
           sidebar,
           components: {
+            SiteTitle: './components/SiteTitle.astro',
             PageTitle: './components/PageTitle.astro',
             EditLink: './components/Source.astro',
           },
