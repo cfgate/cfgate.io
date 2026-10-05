@@ -42,7 +42,7 @@ export function eligibleReleases(
 export class Github {
   constructor(
     private token?: string,
-    private fetcher: typeof fetch = fetch,
+    private fetcher: typeof fetch = globalThis.fetch.bind(globalThis),
     public cache: GithubCache = {}
   ) {}
   async get(path: string): Promise<unknown> {
@@ -57,7 +57,7 @@ export class Github {
         ...(previous?.etag ? { 'If-None-Match': previous.etag } : {}),
       },
       signal: AbortSignal.timeout(8000),
-      redirect: 'error',
+      redirect: 'manual',
     })
     if (response.status === 304 && previous) return previous.value
     if (!response.ok) {
@@ -109,7 +109,7 @@ export class Github {
     safePath(path)
     const response = await this.fetcher(
       `https://raw.githubusercontent.com/${source.repository}/${source.commit}/${path}`,
-      { signal: AbortSignal.timeout(10000), redirect: 'error' }
+      { signal: AbortSignal.timeout(10000), redirect: 'manual' }
     )
     if (!response.ok) throw new Error(`Pinned source ${path} returned ${response.status}`)
     return boundedText(response, 2 * 1024 * 1024)

@@ -13,7 +13,7 @@ export class CloudflarePublication implements PublicationProvider {
     private account: string,
     private token: string,
     private hook: string,
-    private fetcher: typeof fetch = fetch
+    private fetcher: typeof fetch = globalThis.fetch.bind(globalThis)
   ) {}
   private async api(path: string, init: RequestInit = {}): Promise<unknown> {
     if (!/^[a-f0-9]{32}$/.test(this.account))
@@ -24,7 +24,7 @@ export class CloudflarePublication implements PublicationProvider {
         ...init,
         headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(8000),
-        redirect: 'error',
+        redirect: 'manual',
       }
     )
     const payload = z
@@ -44,7 +44,7 @@ export class CloudflarePublication implements PublicationProvider {
     const response = await this.fetcher(this.hook, {
       method: 'POST',
       signal: AbortSignal.timeout(8000),
-      redirect: 'error',
+      redirect: 'manual',
     })
     if (!response.ok) throw new Error(`Build hook returned ${response.status}`)
     return z

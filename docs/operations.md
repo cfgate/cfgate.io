@@ -51,7 +51,7 @@ With the repository's Mise task, prefix commands with `mise run`, for example `m
 
 Review and commit `deployment.json`, `.sops.yaml` and the encrypted file with the implementation. Before merging and activating:
 
-1. Hold automatic production builds and wait for active production builds to finish. If the dashboard does not offer a pause control, temporarily set the production build command to `exit 1`; leave the Git connection and preview settings intact. Setup restores the production commands. This stops new production work without removing the live deployment.
+1. Hold automatic production builds and wait for active production builds to finish. Keep the Git connection intact and temporarily set its production build command to `exit 1`. Disconnecting removes the trigger; reconnecting creates a new identity that must be verified and recorded before setup can resume. Setup restores the production commands. This stops new production work without removing the live deployment.
 2. Merge the reviewed PR, then sync a clean local `main`.
 3. Review the operator and chart pins in `docs/bootstrap.json`, then run:
 
@@ -61,7 +61,7 @@ mise run pnpm run setup --apply --install
 
 Use `--apply` alone when resuming after installation. The first installation needs explicit `--install` because the older Worker may return 404 or 401 for the status endpoint. Setup checks Cloudflare secret metadata and refuses to replace an existing admin or builder credential. An authentication failure is not permission to overwrite credentials.
 
-Setup builds and tests the site, then deploys the Worker, static assets, Durable Object migration and runtime secrets together with `wrangler deploy --secrets-file`. It verifies the installed configuration, configures `pnpm build` and `pnpm run deploy` on the production trigger, and installs its matching builder token. Only then does it initialize the coordinator from the deployed manifest and enable the signed GitHub webhooks. Preview commands and unrelated build variables remain unchanged.
+Setup builds and tests the site, then deploys the Worker, static assets, Durable Object migration and runtime secrets together with `wrangler deploy --secrets-file`. It verifies the installed configuration, configures `pnpm build` and `pnpm run deploy` on the production trigger, and installs its matching builder token. Only then does it initialize the coordinator from the deployed manifest and enable the signed GitHub webhooks. Preview commands and unrelated build variables remain unchanged. Use `pnpm exec wrangler preview` for the preview command.
 
 If installation already completed, setup verifies its state and resumes without redeploying the initial edition. If propagation still exposes the old endpoint while Cloudflare reports installed credentials, wait and retry with the same encrypted values. An older docs-enabled deployment or a deliberate secret rotation requires a reviewed maintenance procedure; `--install` does not bypass existing authentication.
 
@@ -69,7 +69,7 @@ After success, restore any separate dashboard pause control and check `/docs/man
 
 ### Partial failure and local files
 
-These steps are resumable, not atomic across Cloudflare and GitHub. A failure can leave an installed Worker, configured build trigger or one enabled webhook. Retry with the same encrypted configuration. An initialized coordinator is never reset, and setup does not replace newer documentation with bootstrap content.
+These steps are resumable, not atomic across Cloudflare and GitHub. A failure can leave an installed Worker, configured build trigger or one enabled webhook. Retry with the same encrypted configuration. An initialized coordinator is never reset, and setup does not replace newer documentation with bootstrap content. If code deployment succeeds but initialization fails, investigate the Worker logs, deploy any tested code correction with existing secrets preserved, then resume `--apply`. Do not remove credentials or reinstall to bypass the guard.
 
 A local `.activation/setup.lock` prevents concurrent setup commands. After a hard termination, confirm that no setup process is running before removing the stale lock. A hard termination during deployment can leave a private `cfgate-deploy-*` directory in the operating system's temporary directory. Remove that directory after confirming it is no longer in use. Its secrets file is plaintext; ordinary completion removes it. Repository updates use ciphertext-only temporary files and refuse observed concurrent edits. Do not edit secrets while setup is running.
 
